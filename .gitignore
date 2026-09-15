@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment and secrets - never commit these
+.env
+.env.*
+!.env.example
+
+# Runtime data (SQLite lives outside the checkout in production)
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Local deployment specifics (host, user, paths)
+deployments.private.md
+deployments.private*
+
+# Tooling state kept out of version control
+.opencode/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
