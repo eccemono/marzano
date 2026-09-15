@@ -1,9 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import { GuildSerializer } from "../src/domain/serializer";
+import { type TimerSession, type Transition, pause, skip, startSession } from "../src/domain/timer";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const T0 = 1_760_000_000_000;
+const MINUTE = 60_000;
+
+function newSession(): TimerSession {
+  return startSession({
+    guildId: "111111111111111111",
+    voiceChannelId: "222222222222222222",
+    config: {
+      focusMinutes: 25,
+      shortBreakMinutes: 5,
+      longBreakMinutes: 15,
+      cyclesBeforeLongBreak: 4,
+      soundEnabled: true,
+      soundVolume: 80,
+    },
+    now: T0,
+  });
 }
 
 describe("GuildSerializer", () => {
@@ -65,6 +85,34 @@ describe("GuildSerializer", () => {
     await Promise.all([bump(), bump(), bump(), bump(), bump()]);
 
     expect(counter).toBe(5);
+  });
+
+  it("serialises a simultaneous pause and skip into one ordered outcome", async () => {
+    const serializer = new GuildSerializer();
+    let session = newSession();
+    const transitions: Transition[] = [];
+
+    const applyPause = (): Promise<void> =>
+      serializer.run(session.guildId, async () => {
+        session = pause(session, T0 + MINUTE);
+      });
+
+    const applySkip = (): Promise<void> =>
+      serializer.run(session.guildId, async () => {
+        const result = skip(session, T0 + 2 * MINUTE);
+        session = result.session;
+        if (result.transition) transitions.push(result.transition);
+      });
+
+    await Promise.all([applyPause(), applySkip()]);
+
+    // Exactly one stage change happened even though both actions were in
+    // flight, and the session is left in a coherent running state.
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]).toMatchObject({ from: "focus", to: "short_break" });
+    expect(session.state).toBe("running");
+    expect(session.pausedRemainingMs).toBeNull();
+    expect(session.stage).toBe("short_break");
   });
 
   it("returns each task's own result", async () => {
