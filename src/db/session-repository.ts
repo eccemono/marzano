@@ -1,4 +1,10 @@
-import type { PomodoroConfig } from "../domain/config";
+import {
+  SESSION_STAGES,
+  SESSION_STATES,
+  type SessionStage,
+  type SessionState,
+  type TimerSession,
+} from "../domain/timer";
 
 import type { Db } from "./database";
 
@@ -14,30 +20,11 @@ import type { Db } from "./database";
  * must survive a restart without ever touching the saved channel configuration.
  */
 
-export const SESSION_STAGES = ["focus", "short_break", "long_break"] as const;
-export type SessionStage = (typeof SESSION_STAGES)[number];
+export { SESSION_STAGES, SESSION_STATES };
+export type { SessionStage, SessionState };
 
-export const SESSION_STATES = ["running", "paused", "stopped"] as const;
-export type SessionState = (typeof SESSION_STATES)[number];
-
-export interface ActiveSessionRecord {
-  guildId: string;
-  voiceChannelId: string;
-  textChannelId: string | null;
-  statusMessageId: string | null;
-  stage: SessionStage;
-  state: SessionState;
-  /** Epoch milliseconds when the current stage began. */
-  stageStartedAt: number | null;
-  /** Epoch milliseconds when the current stage ends. */
-  stageEndsAt: number | null;
-  /** Exact remainder while paused, so a paused session can be restored. */
-  pausedRemainingMs: number | null;
-  completedFocusStages: number;
-  config: PomodoroConfig;
-  stopReason: string | null;
-  updatedAt: string;
-}
+/** The persisted shape is the engine's session shape. */
+export type ActiveSessionRecord = TimerSession;
 
 interface ActiveSessionRow {
   guild_id: string;
@@ -91,7 +78,6 @@ function rowToRecord(row: ActiveSessionRow): ActiveSessionRecord {
       soundVolume: row.sound_volume,
     },
     stopReason: row.stop_reason,
-    updatedAt: row.updated_at,
   };
 }
 
@@ -112,6 +98,7 @@ export function listActiveSessions(db: Db): ActiveSessionRecord[] {
   return rows.map(rowToRecord);
 }
 
+/** Upsert a session. The guild primary key guarantees one row per guild. */
 export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
   db.prepare(
     `INSERT INTO active_sessions (
@@ -126,23 +113,23 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
        @cycles_before_long_break, @sound_enabled, @sound_volume, @stop_reason, @updated_at
      )
      ON CONFLICT (guild_id) DO UPDATE SET
-       voice_channel_id       = excluded.voice_channel_id,
-       text_channel_id        = excluded.text_channel_id,
-       status_message_id      = excluded.status_message_id,
-       stage                  = excluded.stage,
-       state                  = excluded.state,
-       stage_started_at       = excluded.stage_started_at,
-       stage_ends_at          = excluded.stage_ends_at,
-       paused_remaining_ms    = excluded.paused_remaining_ms,
-       completed_focus_stages = excluded.completed_focus_stages,
-       focus_minutes          = excluded.focus_minutes,
-       short_break_minutes    = excluded.short_break_minutes,
-       long_break_minutes     = excluded.long_break_minutes,
+       voice_channel_id         = excluded.voice_channel_id,
+       text_channel_id          = excluded.text_channel_id,
+       status_message_id        = excluded.status_message_id,
+       stage                    = excluded.stage,
+       state                    = excluded.state,
+       stage_started_at         = excluded.stage_started_at,
+       stage_ends_at            = excluded.stage_ends_at,
+       paused_remaining_ms      = excluded.paused_remaining_ms,
+       completed_focus_stages   = excluded.completed_focus_stages,
+       focus_minutes            = excluded.focus_minutes,
+       short_break_minutes      = excluded.short_break_minutes,
+       long_break_minutes       = excluded.long_break_minutes,
        cycles_before_long_break = excluded.cycles_before_long_break,
-       sound_enabled          = excluded.sound_enabled,
-       sound_volume           = excluded.sound_volume,
-       stop_reason            = excluded.stop_reason,
-       updated_at             = excluded.updated_at`,
+       sound_enabled            = excluded.sound_enabled,
+       sound_volume             = excluded.sound_volume,
+       stop_reason              = excluded.stop_reason,
+       updated_at               = excluded.updated_at`,
   ).run({
     guild_id: record.guildId,
     voice_channel_id: record.voiceChannelId,
@@ -161,7 +148,7 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
     sound_enabled: record.config.soundEnabled ? 1 : 0,
     sound_volume: record.config.soundVolume,
     stop_reason: record.stopReason,
-    updated_at: record.updatedAt,
+    updated_at: new Date().toISOString(),
   });
 }
 
