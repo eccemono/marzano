@@ -1,0 +1,14 @@
+# Keep the build context minimal. Secrets, runtime data and VCS metadata must
+# never be baked into an image.
+.git
+.github
+node_modules
+dist
+data
+coverage
+.env
+.env.*
+!.env.example
+deployments.private*
+*.log
+.opencode
