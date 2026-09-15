@@ -53,7 +53,6 @@ function sessionRecord(overrides: Partial<ActiveSessionRecord> = {}): ActiveSess
     completedFocusStages: 0,
     config: BUILT_IN_DEFAULTS,
     stopReason: null,
-    updatedAt: new Date(1_760_000_000_000).toISOString(),
     ...overrides,
   };
 }
