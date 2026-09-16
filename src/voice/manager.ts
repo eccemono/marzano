@@ -62,7 +62,6 @@ export class SessionVoice {
     const { guildId, voiceChannelId } = session;
 
     if (this.joined.get(guildId) === voiceChannelId && this.gateway.isConnected(guildId)) {
-      await this.silence(guildId);
       return true;
     }
 
@@ -79,7 +78,6 @@ export class SessionVoice {
       return false;
     }
 
-    await this.silence(guildId);
     return true;
   }
 
@@ -121,29 +119,15 @@ export class SessionVoice {
   }
 
   private async announce(session: VoiceSession, withCue: boolean): Promise<void> {
-    const { guildId } = session;
-
     if (!(await this.join(session))) return;
 
     const { soundEnabled, soundVolume } = session.config;
-    if (!soundEnabled || soundVolume <= 0) {
-      // Already silent from `join`; make sure of it and do nothing else.
-      await this.silence(guildId);
-      return;
-    }
+    if (!soundEnabled || soundVolume <= 0) return;
 
-    // Silence is restored in a finally path: if playback or the unmute throws,
-    // the bot must not be left audible and undeafened in the channel.
-    try {
-      await this.speak(guildId);
-
-      if (withCue) {
-        await this.play(session, START_CUE, soundVolume);
-      }
-      await this.play(session, BELL, soundVolume);
-    } finally {
-      await this.silence(guildId);
+    if (withCue) {
+      await this.play(session, START_CUE, soundVolume);
     }
+    await this.play(session, BELL, soundVolume);
   }
 
   private async play(session: VoiceSession, sound: SoundName, volume: number): Promise<void> {
@@ -164,22 +148,6 @@ export class SessionVoice {
         sound,
         reason: describe(error),
       });
-    }
-  }
-
-  private async speak(guildId: string): Promise<void> {
-    try {
-      await this.gateway.setSilenced(guildId, false);
-    } catch (error) {
-      this.logger.warn("could not unmute for playback", { guildId, reason: describe(error) });
-    }
-  }
-
-  private async silence(guildId: string): Promise<void> {
-    try {
-      await this.gateway.setSilenced(guildId, true);
-    } catch (error) {
-      this.logger.warn("could not mute after playback", { guildId, reason: describe(error) });
     }
   }
 }

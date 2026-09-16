@@ -144,12 +144,12 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
         channelId,
         guildId,
         adapterCreator: guild.voiceAdapterCreator,
-        // Deafened, but never muted. selfDeaf only stops the bot *hearing*; it
-        // does not affect what it transmits. selfMute does - it suppresses the
-        // bot's own audio - so joining muted is what made every cue inaudible.
-        // Staying unmuted is safe: a bot has no microphone, and it plays nothing
-        // between cues rather than needing to be muted.
-        selfDeaf: true,
+        // Fully open: neither deafened nor muted. A bot has no microphone to
+        // hear anything with, so deafening it serves no purpose - and any
+        // self-state toggle around playback is exactly what has been breaking
+        // audio. "Silent between bells" comes from simply not playing, not from
+        // suppressing transmission.
+        selfDeaf: false,
         selfMute: false,
       });
 

@@ -140,24 +140,11 @@ describe("button id mapping", () => {
 });
 
 describe("confirmation ids", () => {
-  it("round-trips a confirmed action", () => {
-    expect(parseConfirmationId(confirmIdFor("stop"))).toEqual({
-      action: "stop",
-      confirmed: true,
-    });
-  });
-
-  it("round-trips a cancelled action", () => {
-    expect(parseConfirmationId(cancelIdFor("stop"))).toEqual({
-      action: "stop",
-      confirmed: false,
-    });
-  });
-
-  it("rejects a non-confirmable action", () => {
-    expect(parseConfirmationId(confirmIdFor("pause"))).toBeNull();
-    expect(parseConfirmationId(confirmIdFor("extend"))).toBeNull();
+  it("has nothing to confirm any more", () => {
+    expect(parseConfirmationId(confirmIdFor("stop"))).toBeNull();
+    expect(parseConfirmationId(cancelIdFor("stop"))).toBeNull();
     expect(parseConfirmationId(confirmIdFor("skip"))).toBeNull();
+    expect(parseConfirmationId(confirmIdFor("pause"))).toBeNull();
   });
 
   it("rejects foreign ids", () => {
