@@ -80,6 +80,10 @@ https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+application
 ```
 
 `3165184` is exactly the five permissions above. **Do not grant Administrator.**
+
+To also mirror the stage into the voice channel's status line, add Set Voice
+Channel Status — that is `281474979875840`. This is optional and off by default
+(`VOICE_STATUS_ENABLED`); leave it out and everything else works unchanged.
 Marzano never needs it: it only ever changes its own voice state, and it never
 requests permission to move, mute or disconnect anyone else.
 
