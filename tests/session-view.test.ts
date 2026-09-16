@@ -140,22 +140,33 @@ describe("relativeTimestamp", () => {
 });
 
 describe("channelStatusText", () => {
-  it("names the stage and the minutes left", () => {
+  it("names the stage, with its icon, and the minutes left", () => {
     const session = newSession();
 
-    expect(channelStatusText(session, T0 + 13 * MINUTE)).toBe("Focus - 12m left");
+    expect(channelStatusText(session, T0 + 13 * MINUTE)).toBe("\u{1F345} Focus - 12m left");
   });
 
   it("says paused instead of a countdown when paused", () => {
     const paused = pause(newSession(), T0 + 10 * MINUTE);
 
-    expect(channelStatusText(paused, T0 + 99 * MINUTE)).toBe("Focus - paused");
+    expect(channelStatusText(paused, T0 + 99 * MINUTE)).toBe("\u{1F345} Focus - paused");
+  });
+
+  it("gives each stage its own icon", () => {
+    // Work, the short break and the long one are one glance apart.
+    const shortBreak = { ...newSession(), stage: "short_break" as const };
+    const longBreak = { ...newSession(), stage: "long_break" as const };
+
+    expect(channelStatusText(shortBreak, T0)).toContain("\u{2615}");
+    expect(channelStatusText(longBreak, T0)).toContain("\u{1F37D}");
+
+    expect(channelStatusText(shortBreak, T0)).not.toBe(channelStatusText(longBreak, T0));
   });
 
   it("never rounds a live stage down to zero minutes", () => {
     const session = newSession();
 
-    expect(channelStatusText(session, T0 + 25 * MINUTE - 1_000)).toBe("Focus - 1m left");
+    expect(channelStatusText(session, T0 + 25 * MINUTE - 1_000)).toBe("\u{1F345} Focus - 1m left");
   });
 
   it("has nothing to say once the session has stopped", () => {

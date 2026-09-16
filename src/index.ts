@@ -232,9 +232,6 @@ async function main(): Promise<void> {
         gatewayLatencyMs: () => client.ws.ping,
         guildCount: () => client.guilds.cache.size,
         applicationId: () => client.application?.id ?? config.clientId,
-        // TEMPORARY: only the /test audio diagnostic uses these.
-        voice,
-        sounds,
       }).catch((error: unknown) => {
         logger.error("interaction failed", {
           error: error instanceof Error ? error.message : String(error),

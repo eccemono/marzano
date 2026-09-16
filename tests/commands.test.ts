@@ -59,8 +59,6 @@ describe("command definitions", () => {
       "stop",
       "leaderboard",
       "info",
-      // TEMPORARY: the audio diagnostic, removed with the /test command.
-      "test",
     ]);
     expect(INFO_COMMAND.name).toBe("info");
   });

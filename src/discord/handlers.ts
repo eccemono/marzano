@@ -3,7 +3,6 @@ import {
   type Interaction,
   type ModalSubmitInteraction,
   MessageFlags,
-  PermissionFlagsBits,
 } from "discord.js";
 
 import { getChannelConfig, getGuildDefaults } from "../db/config-repository";
@@ -42,14 +41,6 @@ import { leaderboardTotals } from "../db/history-repository";
 import { periodBounds, type LeaderboardPeriod } from "../domain/attendance";
 import type { SessionRendererPort } from "./session-renderer";
 import type { SessionSupervisor } from "../session/supervisor";
-import type { SessionVoice } from "../voice/manager";
-import { WORK_CUE, type SoundLibrary } from "../voice/sounds";
-import {
-  PLAYBACK_STRATEGIES,
-  STRATEGY_HELP,
-  type PlaybackStrategy,
-  type TestStrategy,
-} from "../voice/diagnostics";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import {
@@ -60,7 +51,6 @@ import {
   PERIODS,
   STATUS_COMMAND,
   STOP_COMMAND,
-  TEST_COMMAND,
   isStartCommand,
 } from "../commands/definitions";
 import { buildInfoEmbed, type InfoPayload } from "../commands/info";
@@ -88,14 +78,6 @@ export interface HandlerDeps {
   gatewayLatencyMs(): number;
   guildCount(): number;
   applicationId(): string;
-  /**
-   * TEMPORARY: voice access for the `/test` audio diagnostic.
-   *
-   * Optional so nothing else has to know about the command; the handler reports
-   * that diagnostics are unavailable rather than failing.
-   */
-  voice?: SessionVoice;
-  sounds?: SoundLibrary;
 }
 
 function ephemeral(content: string): { content: string; flags: number } {
@@ -525,100 +507,6 @@ async function handleLeaderboard(
 }
 
 /**
- * TEMPORARY: report what the voice path is actually doing.
- *
- * Encoding and the cue assets have both been verified independently, so the
- * remaining question is which playback path is audible. Each strategy is timed:
- * a cue that really plays takes about as long as the audio lasts, while one the
- * pipeline swallows immediately reports a few milliseconds.
- */
-function botPermissions(
-  interaction: ChatInputCommandInteraction,
-  deps: HandlerDeps,
-  channelId: string,
-): string {
-  const channel = interaction.guild?.channels.cache.get(channelId);
-  if (!channel) return "unknown (channel not cached)";
-
-  const permissions = channel.permissionsFor(deps.applicationId());
-  if (!permissions) return "unknown (no permission object)";
-
-  return `Connect=${permissions.has(PermissionFlagsBits.Connect)} Speak=${permissions.has(
-    PermissionFlagsBits.Speak,
-  )}`;
-}
-
-async function handleTest(
-  interaction: ChatInputCommandInteraction,
-  deps: HandlerDeps,
-): Promise<void> {
-  const guildId = interaction.guildId;
-  if (!guildId) {
-    await interaction.reply(ephemeral("Marzano only works inside a server."));
-    return;
-  }
-
-  if (!deps.voice) {
-    await interaction.reply(ephemeral("Voice diagnostics are not wired up in this build."));
-    return;
-  }
-
-  const voiceChannelId = callerVoiceChannelId(interaction);
-  if (!voiceChannelId) {
-    await interaction.reply(ephemeral("Join a voice channel first, then run /test again."));
-    return;
-  }
-
-  const requested = interaction.options.getString("strategy") ?? "diag";
-  const strategy: TestStrategy = (["diag", ...PLAYBACK_STRATEGIES] as string[]).includes(requested)
-    ? (requested as TestStrategy)
-    : "diag";
-
-  // Several seconds of audio: defer so the interaction is answered in time.
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-  const lines: string[] = [];
-  lines.push(`channel: <#${voiceChannelId}>`);
-  lines.push(`bot perms: ${botPermissions(interaction, deps, voiceChannelId)}`);
-  lines.push(`voice connection: ${deps.voice.isConnected(guildId) ? "ready" : "none"}`);
-
-  const bellFrames = deps.sounds?.frames(WORK_CUE, 80)?.length;
-  lines.push(`work cue frames at 80%: ${bellFrames ?? "unavailable"}`);
-
-  const strategies: readonly PlaybackStrategy[] =
-    strategy === "diag" ? PLAYBACK_STRATEGIES : [strategy];
-
-  const session = {
-    guildId,
-    voiceChannelId,
-    stage: "focus" as const,
-    state: "running" as const,
-    config: { soundEnabled: true, soundVolume: 100 },
-  };
-
-  for (const candidate of strategies) {
-    lines.push(`— ${candidate}: ${STRATEGY_HELP[candidate]}`);
-    const report = await deps.voice.playTest(session, candidate);
-    lines.push(
-      [
-        `  played=${report.played}`,
-        `elapsed=${report.elapsedMs}ms`,
-        `frames=${report.frames}`,
-        `bytes=${report.bytes}`,
-        `states=${report.states.join(" -> ") || "none"}`,
-        report.reason ? `reason=${report.reason}` : "",
-      ]
-        .filter(Boolean)
-        .join("  "),
-    );
-  }
-
-  lines.push(`connection after: ${deps.voice.isConnected(guildId) ? "ready" : "none"}`);
-
-  await interaction.editReply(lines.join("\n"));
-}
-
-/**
  * Change the split for the running session only.
  *
  * The running stage keeps its existing deadline; the new durations apply from
@@ -867,12 +755,6 @@ export async function handleInteraction(
 
   if (command === LEADERBOARD_COMMAND.name) {
     await handleLeaderboard(interaction, deps);
-    return;
-  }
-
-  // TEMPORARY: audio diagnosis, removed once cue playback is known-good.
-  if (command === TEST_COMMAND.name) {
-    await handleTest(interaction, deps);
     return;
   }
 }

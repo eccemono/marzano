@@ -231,22 +231,6 @@ describe("the voice gateway changes its own self state", () => {
   });
 });
 
-describe("the /test audio diagnostic is wired into the interaction handler", () => {
-  it("passes the voice layer and the sound library to handleInteraction", async () => {
-    // The diagnostic degrades to "Voice diagnostics are not wired up in this
-    // build." when its dependencies are missing, and that is exactly how the
-    // first version shipped: the wiring had been added to the *mention* handler
-    // instead of the interaction handler, so nothing failed until a human ran
-    // /test. Asserting the dependency object keeps that from recurring silently.
-    const source = await readFile(join(__dirname, "..", "src", "index.ts"), "utf8");
-    const fromInteraction = source.slice(source.indexOf("Events.InteractionCreate"));
-    const deps = fromInteraction.slice(0, fromInteraction.indexOf("}).catch"));
-
-    expect(deps).toContain("voice,");
-    expect(deps).toContain("sounds,");
-  });
-});
-
 describe("the slash stop command", () => {
   it("goes through the supervisor instead of only editing the database", async () => {
     // The old handler wrote the stopped row and deleted it, and stopped there.

@@ -113,6 +113,34 @@ describe("wake", () => {
 });
 
 describe("recovery", () => {
+  it("discards a session far older than any real block, without stopping it loudly", async () => {
+    // A row still active half a day later is residue from a killed process, not
+    // a session: resuming it would drop a stale countdown into a channel that
+    // has moved on.
+    const { db, supervisor, voice } = setup();
+    saveActiveSession(db, {
+      ...newSession(),
+      stageStartedAt: START - 20 * 60 * MINUTE,
+    });
+
+    const report = await supervisor.recover();
+
+    expect(report.stale).toBe(1);
+    expect(getActiveSession(db, GUILD)).toBeNull();
+    // Discarded quietly - no leave, no summary, nothing announced.
+    expect(voice.transitions).toBe(0);
+  });
+
+  it("keeps a session that is merely a long one", async () => {
+    const { db, supervisor } = setup();
+    saveActiveSession(db, { ...newSession(), stageStartedAt: START - 60 * MINUTE });
+
+    const report = await supervisor.recover();
+
+    expect(report.stale).toBe(0);
+    expect(getActiveSession(db, GUILD)).not.toBeNull();
+  });
+
   it("replays elapsed boundaries without ringing, and reports how many it skipped", async () => {
     const { db, voice, presenter, supervisor, timers } = setup();
 

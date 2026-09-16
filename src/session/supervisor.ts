@@ -52,6 +52,16 @@ export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
  */
 export const JOIN_PRE_ROLL_MS = 5_000;
 
+/**
+ * How old an active session can be before recovery discards it outright.
+ *
+ * A Pomodoro block is minutes long, so a row still marked active half a day
+ * later is the residue of a session nobody finished - the process was killed
+ * and the row was never cleared. Twelve hours is far beyond any real session
+ * and far short of "yesterday", so nothing legitimate is ever swept away.
+ */
+export const STALE_SESSION_MS = 12 * 60 * 60 * 1_000;
+
 /** The optional voice-channel status, cleared when a session ends. */
 export interface VoiceStatusPort {
   clear(session: TimerSession): Promise<void>;
@@ -96,6 +106,12 @@ export interface RecoveryReport {
   bellsSkipped: number;
   /** Sessions that could not be resumed and were stopped with a reason. */
   unrecoverable: number;
+  /**
+   * Rows discarded for being far too old to still be running.
+   *
+   * Nothing was stopped and nothing was announced; the row is simply gone.
+   */
+  stale: number;
 }
 
 function describe(error: unknown): string {
@@ -305,6 +321,7 @@ export class SessionSupervisor {
       transitionsReplayed: 0,
       bellsSkipped: 0,
       unrecoverable: 0,
+      stale: 0,
     };
 
     for (const session of listActiveSessions(this.db)) {
@@ -313,6 +330,23 @@ export class SessionSupervisor {
       // A stopped row is residue; clear it so the guild can start again.
       if (isStopped(session)) {
         deleteActiveSession(this.db, guildId);
+        continue;
+      }
+
+      // A session far older than any block could be is not a session, it is a
+      // row a killed process never cleared. Resuming it would drop a stale
+      // countdown into a channel that has long since moved on, so it is
+      // discarded silently rather than stopped loudly.
+      if (
+        session.stageStartedAt !== null &&
+        this.now() - session.stageStartedAt > STALE_SESSION_MS
+      ) {
+        this.logger.info("discarding a stale session", {
+          guildId,
+          ageMs: this.now() - session.stageStartedAt,
+        });
+        deleteActiveSession(this.db, guildId);
+        report.stale += 1;
         continue;
       }
 

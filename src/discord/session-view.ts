@@ -107,16 +107,19 @@ export function cyclePosition(session: TimerSession): string {
 export function channelStatusText(session: TimerSession, now: number): string | null {
   if (session.state === "stopped") return null;
 
+  // The icon is what makes the channel's own status readable at a glance: a
+  // tomato for work, a coffee for the short break, a plate for the long one.
+  const icon = STAGE_ICONS[session.stage];
   const label = STAGE_LABELS[session.stage];
 
   if (isPaused(session)) {
-    return `${label} - paused`;
+    return `${icon} ${label} - paused`;
   }
 
   const remaining = remainingMs(session, now);
   const minutes = Math.max(1, Math.ceil(remaining / 60_000));
 
-  return `${label} - ${minutes}m left`;
+  return `${icon} ${label} - ${minutes}m left`;
 }
 
 export interface SessionEmbedInput {

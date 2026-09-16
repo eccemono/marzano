@@ -45,7 +45,9 @@ describe("voice channel status", () => {
 
     await status.sync(newSession(), 1_760_000_000_000 + 13 * MINUTE);
 
-    expect(gateway.writes).toEqual([{ channelId: "222222222222222222", text: "Focus - 12m left" }]);
+    expect(gateway.writes).toEqual([
+      { channelId: "222222222222222222", text: "\u{1F345} Focus - 12m left" },
+    ]);
   });
 
   it("does not write again while the text is unchanged", async () => {
@@ -69,8 +71,8 @@ describe("voice channel status", () => {
     await status.sync(session, 1_760_000_000_000 + MINUTE);
 
     expect(gateway.writes.map((write) => write.text)).toEqual([
-      "Focus - 25m left",
-      "Focus - 24m left",
+      "\u{1F345} Focus - 25m left",
+      "\u{1F345} Focus - 24m left",
     ]);
   });
 

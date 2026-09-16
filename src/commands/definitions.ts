@@ -187,33 +187,6 @@ export const INFO_COMMAND = {
   description: "Show Marzano's version, uptime and source repository",
 } as const;
 
-/**
- * TEMPORARY: audio diagnosis.
- *
- * This exists only while the silent-cue cause is being found, so an operator can
- * play a cue through each candidate audio path and report which one is audible.
- * It is registered like any other command but is removed once the working path is
- * folded into the real cue playback.
- */
-export const TEST_COMMAND = {
-  name: "test",
-  description: "TEMPORARY: play a test cue through each audio path to find the silent one",
-  options: [
-    {
-      type: ApplicationCommandOptionType.String,
-      name: "strategy",
-      description: "Which audio path to try (default: all of them)",
-      required: false,
-      choices: [
-        { name: "all paths + connection report", value: "diag" },
-        { name: "current (shipped opusscript path)", value: "current" },
-        { name: "native (@discordjs/opus)", value: "native" },
-        { name: "pcm (raw PCM pipeline)", value: "pcm" },
-      ],
-    },
-  ],
-} as const;
-
 export const PERIODS = ["monthly", "yearly", "all-time"] as const;
 export type LeaderboardPeriodChoice = (typeof PERIODS)[number];
 
@@ -226,7 +199,6 @@ export const APPLICATION_COMMANDS = [
   STOP_COMMAND,
   LEADERBOARD_COMMAND,
   INFO_COMMAND,
-  TEST_COMMAND,
 ] as const;
 
 /** Commands that begin a session, and are therefore interchangeable. */
