@@ -1,6 +1,6 @@
 import { type ButtonInteraction, MessageFlags } from "discord.js";
 
-import { deleteActiveSession, getActiveSession, saveActiveSession } from "../db/session-repository";
+import { getActiveSession, saveActiveSession } from "../db/session-repository";
 import type { Db } from "../db/database";
 import {
   type TimerSession,
@@ -30,7 +30,7 @@ import {
 } from "./session-controls";
 import type { SessionPresenter } from "./session-presenter";
 import { buildSplitModal, formatSplit } from "./modals";
-import type { SessionVoice } from "../voice/manager";
+import type { SessionSupervisor } from "../session/supervisor";
 
 /**
  * The session control buttons.
@@ -45,7 +45,7 @@ import type { SessionVoice } from "../voice/manager";
 export interface SessionButtonDeps {
   db: Db;
   presenter: SessionPresenter;
-  voice: SessionVoice;
+  supervisor: SessionSupervisor;
   voiceChannelIdOf(interaction: ButtonInteraction): string | null;
 }
 
@@ -181,23 +181,26 @@ export async function handleSessionButton(
   const applied = applyAction(resolved, stored, interaction.customId, now);
 
   if (applied.remove) {
-    deleteActiveSession(deps.db, guildId);
-    // Leave the voice channel as part of stopping, otherwise the bot would sit
-    // in the channel indefinitely after the session it was there for ended.
-    void deps.voice.leave();
+    // The supervisor owns stopping: it records the reason, cancels timers,
+    // leaves the voice channel and frees the guild for a new session.
+    await deps.supervisor.stop(guildId, "stopped by a participant");
   } else {
     saveActiveSession(deps.db, applied.session);
+
+    // Skip, extend, pause and resume all move or clear the deadline, so the
+    // supervisor has to re-arm rather than keep its stale timer.
+    deps.supervisor.reschedule(guildId);
 
     // A skip moves the session into a new stage, so it gets the bell. Not
     // awaited: audio must not delay the acknowledgement.
     if (resolved === "skip") {
-      void deps.voice.announceTransition(applied.session);
+      deps.supervisor.announceTransition(guildId);
     }
-  }
 
-  const rendered = await deps.presenter.render(applied.session);
-  if (!applied.remove && rendered.messageId !== applied.session.statusMessageId) {
-    saveActiveSession(deps.db, { ...applied.session, statusMessageId: rendered.messageId });
+    const rendered = await deps.presenter.render(applied.session);
+    if (rendered.messageId !== applied.session.statusMessageId) {
+      saveActiveSession(deps.db, { ...applied.session, statusMessageId: rendered.messageId });
+    }
   }
 
   // The status message is the visible acknowledgement, so keep the reply

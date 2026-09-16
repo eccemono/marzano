@@ -12,22 +12,23 @@ import { createMessageGateway } from "./discord/message-gateway";
 import { SessionPresenter } from "./discord/session-presenter";
 import { createLogger, type Logger } from "./logger";
 import { BOT_NAME, REPOSITORY_URL, VERSION, assertSupportedNode } from "./runtime";
+import { createDiscordAudience } from "./session/audience";
+import { SessionSupervisor } from "./session/supervisor";
 import { createDiscordVoiceGateway } from "./voice/gateway";
 import { SessionVoice } from "./voice/manager";
 import { createSoundLibrary } from "./voice/sounds";
 
 /**
- * One presenter per guild.
+ * Keep the countdown on screen ticking.
  *
- * The refresh loop is per-session, and because a guild holds at most one
- * session, a presenter per guild is enough. Supervision of these loops across
- * restarts belongs to the lifecycle task.
+ * This is presentation only. The supervisor owns when a stage actually ends;
+ * this loop just re-renders so the remaining time stays roughly current rather
+ * than frozen at the moment the last event happened.
  */
 function startRefreshLoops(
   client: Client,
   logger: Logger,
   db: ReturnType<typeof openMigratedDatabase>["db"],
-  presenters: Map<string, SessionPresenter>,
 ): void {
   for (const guild of client.guilds.cache.values()) {
     const session = getActiveSession(db, guild.id);
@@ -37,7 +38,6 @@ function startRefreshLoops(
       gateway: createMessageGateway(client),
       logger: logger.child({ component: "session", guildId: guild.id }),
     });
-    presenters.set(guild.id, presenter);
 
     presenter.startLoop(
       () => getActiveSession(db, guild.id),
@@ -47,8 +47,6 @@ function startRefreshLoops(
         }
       },
     );
-
-    logger.info("resumed status refresh", { guildId: guild.id });
   }
 }
 
@@ -64,8 +62,8 @@ async function main(): Promise<void> {
     const { db, migration } = openMigratedDatabase(config.dataDir);
     logger.info("database ready", { dataDir: config.dataDir, schemaVersion: migration.to });
 
-    // Prepare the cue sounds before logging in. Encoding is a few hundred
-    // milliseconds; doing it here keeps the first session start responsive and
+    // Prepare the cue sounds before logging in. Encoding takes a few hundred
+    // milliseconds; doing it here keeps the first session responsive and
     // surfaces a broken asset at startup rather than mid-session.
     const sounds = createSoundLibrary({
       directory: config.soundsDir,
@@ -93,7 +91,6 @@ async function main(): Promise<void> {
 
     const client: Client = createClient();
     const startedAt = Date.now();
-    const presenters = new Map<string, SessionPresenter>();
 
     const voice = new SessionVoice({
       gateway: createDiscordVoiceGateway({
@@ -104,22 +101,41 @@ async function main(): Promise<void> {
       logger: logger.child({ component: "voice" }),
     });
 
-    // A single shared presenter handles session starts from commands; the
-    // per-guild loops above are tracked separately.
-    const commandPresenter = new SessionPresenter({
+    const presenter = new SessionPresenter({
       gateway: createMessageGateway(client),
-      logger: logger.child({ component: "session-command" }),
+      logger: logger.child({ component: "session" }),
     });
 
-    const handlerDeps = {
+    const supervisor = new SessionSupervisor({
       db,
-      presenter: commandPresenter,
       voice,
-      uptimeSeconds: () => Math.floor((Date.now() - startedAt) / 1_000),
-      gatewayLatencyMs: () => client.ws.ping,
-      guildCount: () => client.guilds.cache.size,
-      applicationId: () => client.application?.id ?? config.clientId,
-    };
+      presenter,
+      audience: createDiscordAudience(client),
+      logger: logger.child({ component: "lifecycle" }),
+      graceMs: config.graceMs,
+    });
+
+    let shuttingDown = false;
+
+    async function shutdown(signal: string): Promise<void> {
+      if (shuttingDown) return;
+      shuttingDown = true;
+
+      logger.info("shutting down", { signal, timeoutMs: config.shutdownTimeoutMs });
+      try {
+        await supervisor.shutdown(config.shutdownTimeoutMs);
+      } catch (error) {
+        logger.error("shutdown did not complete cleanly", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        client.destroy();
+        process.exit(0);
+      }
+    }
+
+    process.on("SIGINT", () => void shutdown("SIGINT"));
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
     client.once(Events.ClientReady, (ready) => {
       logger.info("ready", {
@@ -129,11 +145,43 @@ async function main(): Promise<void> {
         repository: REPOSITORY_URL,
       });
 
-      startRefreshLoops(client, logger, db, presenters);
+      void (async () => {
+        try {
+          const report = await supervisor.recover();
+          logger.info("recovery complete", { ...report });
+        } catch (error) {
+          logger.error("recovery failed; starting without resuming sessions", {
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        startRefreshLoops(client, logger, db);
+      })();
+    });
+
+    // Who is in a channel decides whether a session should keep running.
+    client.on(Events.VoiceStateUpdate, (before, after) => {
+      const guildId = after.guild.id;
+      // Ignore changes that cannot affect presence in the session's channel.
+      if (after.channelId === null && before.channelId === null) return;
+      void supervisor.presenceChanged(guildId).catch((error: unknown) => {
+        logger.warn("presence check failed", {
+          guildId,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      });
     });
 
     client.on(Events.InteractionCreate, (interaction) => {
-      void handleInteraction(interaction, handlerDeps).catch((error: unknown) => {
+      void handleInteraction(interaction, {
+        db,
+        presenter,
+        supervisor,
+        uptimeSeconds: () => Math.floor((Date.now() - startedAt) / 1_000),
+        gatewayLatencyMs: () => client.ws.ping,
+        guildCount: () => client.guilds.cache.size,
+        applicationId: () => client.application?.id ?? config.clientId,
+      }).catch((error: unknown) => {
         logger.error("interaction failed", {
           error: error instanceof Error ? error.message : String(error),
         });
