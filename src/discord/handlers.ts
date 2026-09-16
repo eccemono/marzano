@@ -11,6 +11,7 @@ import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
 import { SESSION_SPLIT_MODAL_ID, authorizeControl } from "./session-controls";
 import type { SessionPresenter } from "./session-presenter";
+import type { SessionVoice } from "../voice/manager";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import { INFO_COMMAND, POMODORO_COMMAND, type PomodoroSubcommand } from "../commands/definitions";
@@ -29,6 +30,7 @@ import { WizardError, applyChannelWizard, applyGuildDefaultsWizard } from "../co
 export interface HandlerDeps {
   db: Db;
   presenter: SessionPresenter;
+  voice: SessionVoice;
   uptimeSeconds(): number;
   gatewayLatencyMs(): number;
   guildCount(): number;
@@ -127,7 +129,13 @@ async function handleStart(
   // Post the canonical status message and remember its id, so later refreshes
   // edit this one instead of posting duplicates.
   const rendered = await deps.presenter.render(session);
-  saveActiveSession(deps.db, { ...session, statusMessageId: rendered.messageId });
+  const started = { ...session, statusMessageId: rendered.messageId };
+  saveActiveSession(deps.db, started);
+
+  // Audio is decorative and can be slow, so it is deliberately not awaited: a
+  // sluggish voice join must never delay the command acknowledgement, and a
+  // failed one must never fail the session.
+  void deps.voice.announceStart(started);
 
   await interaction.reply(
     ephemeral(
@@ -394,6 +402,7 @@ export async function handleInteraction(
     await handleSessionButton(interaction, {
       db: deps.db,
       presenter: deps.presenter,
+      voice: deps.voice,
       voiceChannelIdOf: callerVoiceChannelId,
     });
     return;

@@ -14,6 +14,7 @@
     "format:check": "biome format src tests",
     "test": "vitest run",
     "test:watch": "vitest",
+    "sounds": "tsx scripts/generate-sounds.ts",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts"
   },
@@ -29,7 +30,9 @@
     "@discordjs/voice": "^0.19.2",
     "better-sqlite3": "^12.11.1",
     "discord.js": "^14.27.0",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "libsodium-wrappers": "^0.7.16",
+    "opusscript": "^0.1.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.13",

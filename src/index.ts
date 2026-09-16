@@ -12,6 +12,9 @@ import { createMessageGateway } from "./discord/message-gateway";
 import { SessionPresenter } from "./discord/session-presenter";
 import { createLogger, type Logger } from "./logger";
 import { BOT_NAME, REPOSITORY_URL, VERSION, assertSupportedNode } from "./runtime";
+import { createDiscordVoiceGateway } from "./voice/gateway";
+import { SessionVoice } from "./voice/manager";
+import { createSoundLibrary } from "./voice/sounds";
 
 /**
  * One presenter per guild.
@@ -61,6 +64,23 @@ async function main(): Promise<void> {
     const { db, migration } = openMigratedDatabase(config.dataDir);
     logger.info("database ready", { dataDir: config.dataDir, schemaVersion: migration.to });
 
+    // Prepare the cue sounds before logging in. Encoding is a few hundred
+    // milliseconds; doing it here keeps the first session start responsive and
+    // surfaces a broken asset at startup rather than mid-session.
+    const sounds = createSoundLibrary({
+      directory: config.soundsDir,
+      logger: logger.child({ component: "sound" }),
+    });
+    const soundReport = sounds.preload();
+    if (soundReport.unavailable.length > 0) {
+      logger.warn("running without some cue sounds; the timer is unaffected", {
+        directory: config.soundsDir,
+        unavailable: soundReport.unavailable,
+      });
+    } else {
+      logger.info("cue sounds ready", { available: soundReport.available });
+    }
+
     const registration = await registerCommands({
       token: config.discordToken,
       clientId: config.clientId,
@@ -75,6 +95,15 @@ async function main(): Promise<void> {
     const startedAt = Date.now();
     const presenters = new Map<string, SessionPresenter>();
 
+    const voice = new SessionVoice({
+      gateway: createDiscordVoiceGateway({
+        client,
+        sounds,
+        logger: logger.child({ component: "voice" }),
+      }),
+      logger: logger.child({ component: "voice" }),
+    });
+
     // A single shared presenter handles session starts from commands; the
     // per-guild loops above are tracked separately.
     const commandPresenter = new SessionPresenter({
@@ -85,6 +114,7 @@ async function main(): Promise<void> {
     const handlerDeps = {
       db,
       presenter: commandPresenter,
+      voice,
       uptimeSeconds: () => Math.floor((Date.now() - startedAt) / 1_000),
       gatewayLatencyMs: () => client.ws.ping,
       guildCount: () => client.guilds.cache.size,

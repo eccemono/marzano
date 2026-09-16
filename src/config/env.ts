@@ -19,6 +19,9 @@ export interface AppConfig {
   clientId: string;
   logLevel: LogLevel;
   dataDir: string;
+  /** Directory holding the generated cue sounds (`start.wav`, `bell.wav`). */
+  soundsDir: string;
+  /** Kept so the FFmpeg path can be supplied; the audio path no longer needs it. */
   ffmpegPath: string;
   /** When set, slash commands register in this guild only (instant updates). */
   devGuildId: string | null;
@@ -28,6 +31,7 @@ export interface AppConfig {
 const SNOWFLAKE = /^\d{17,20}$/;
 
 const DEFAULT_DATA_DIR = "./data";
+const DEFAULT_SOUNDS_DIR = "./assets/sounds";
 const DEFAULT_FFMPEG_PATH = "ffmpeg";
 const DEFAULT_LOG_LEVEL: LogLevel = "info";
 
@@ -77,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     clientId,
     logLevel: readLogLevel(env),
     dataDir: (env.DATA_DIR ?? "").trim() || DEFAULT_DATA_DIR,
+    soundsDir: (env.SOUNDS_DIR ?? "").trim() || DEFAULT_SOUNDS_DIR,
     ffmpegPath: (env.FFMPEG_PATH ?? "").trim() || DEFAULT_FFMPEG_PATH,
     devGuildId: devGuildId.length > 0 ? devGuildId : null,
   };
