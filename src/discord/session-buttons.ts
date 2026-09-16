@@ -28,7 +28,7 @@ import {
   authorizeControl,
   parseConfirmationId,
 } from "./session-controls";
-import type { SessionPresenter } from "./session-presenter";
+import type { SessionRendererPort } from "./session-renderer";
 import { buildSplitModal, formatSplit } from "./modals";
 import type { SessionSupervisor } from "../session/supervisor";
 
@@ -44,7 +44,7 @@ import type { SessionSupervisor } from "../session/supervisor";
 
 export interface SessionButtonDeps {
   db: Db;
-  presenter: SessionPresenter;
+  presenter: SessionRendererPort;
   supervisor: SessionSupervisor;
   voiceChannelIdOf(interaction: ButtonInteraction): string | null;
 }

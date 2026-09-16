@@ -12,6 +12,8 @@
  *   - Audio is strictly decorative. Every failure path here ends in a log line
  *     and a `return`; nothing in this class can fail a session, and callers are
  *     expected to invoke it without awaiting so playback never delays the timer.
+ *   - Voice state is tracked per guild, so a session in one guild can never
+ *     leave, silence or replace a session in another.
  */
 
 import type { Logger } from "../logger";
@@ -37,16 +39,16 @@ export interface SessionVoiceOptions {
 export class SessionVoice {
   private readonly gateway: VoiceGateway;
   private readonly logger: Logger;
-  private joinedChannelId: string | null = null;
+  private readonly joined = new Map<string, string>();
 
   constructor(options: SessionVoiceOptions) {
     this.gateway = options.gateway;
     this.logger = options.logger;
   }
 
-  /** The channel currently joined, or null. */
-  get channelId(): string | null {
-    return this.joinedChannelId;
+  /** The channel currently joined in a guild, or null. */
+  channelId(guildId: string): string | null {
+    return this.joined.get(guildId) ?? null;
   }
 
   /**
@@ -57,25 +59,27 @@ export class SessionVoice {
    * thrown, because audio is optional and the timer is not.
    */
   async join(session: VoiceSession): Promise<boolean> {
-    if (this.joinedChannelId === session.voiceChannelId && this.gateway.connected) {
-      await this.silence();
+    const { guildId, voiceChannelId } = session;
+
+    if (this.joined.get(guildId) === voiceChannelId && this.gateway.isConnected(guildId)) {
+      await this.silence(guildId);
       return true;
     }
 
     try {
-      await this.gateway.join(session.guildId, session.voiceChannelId);
-      this.joinedChannelId = session.voiceChannelId;
+      await this.gateway.join(guildId, voiceChannelId);
+      this.joined.set(guildId, voiceChannelId);
     } catch (error) {
-      this.joinedChannelId = null;
+      this.joined.delete(guildId);
       this.logger.warn("could not join the voice channel; the session continues without audio", {
-        guildId: session.guildId,
-        channelId: session.voiceChannelId,
+        guildId,
+        channelId: voiceChannelId,
         reason: describe(error),
       });
       return false;
     }
 
-    await this.silence();
+    await this.silence(guildId);
     return true;
   }
 
@@ -94,40 +98,57 @@ export class SessionVoice {
     await this.announce(session, false);
   }
 
-  /** Leave the voice channel and forget the connection. */
-  async leave(): Promise<void> {
+  /** Leave one guild's voice channel and forget the connection. */
+  async leave(guildId: string): Promise<void> {
     try {
-      this.gateway.leave();
+      this.gateway.leave(guildId);
     } catch (error) {
-      this.logger.warn("failed to leave the voice channel", { reason: describe(error) });
+      this.logger.warn("failed to leave the voice channel", { guildId, reason: describe(error) });
     } finally {
-      this.joinedChannelId = null;
+      this.joined.delete(guildId);
+    }
+  }
+
+  /** Leave every voice channel. Used on shutdown. */
+  async leaveAll(): Promise<void> {
+    try {
+      this.gateway.leaveAll();
+    } catch (error) {
+      this.logger.warn("failed to leave the voice channels", { reason: describe(error) });
+    } finally {
+      this.joined.clear();
     }
   }
 
   private async announce(session: VoiceSession, withCue: boolean): Promise<void> {
+    const { guildId } = session;
+
     if (!(await this.join(session))) return;
 
     const { soundEnabled, soundVolume } = session.config;
     if (!soundEnabled || soundVolume <= 0) {
       // Already silent from `join`; make sure of it and do nothing else.
-      await this.silence();
+      await this.silence(guildId);
       return;
     }
 
-    await this.speak();
+    // Silence is restored in a finally path: if playback or the unmute throws,
+    // the bot must not be left audible and undeafened in the channel.
+    try {
+      await this.speak(guildId);
 
-    if (withCue) {
-      await this.play(session, START_CUE, soundVolume);
+      if (withCue) {
+        await this.play(session, START_CUE, soundVolume);
+      }
+      await this.play(session, BELL, soundVolume);
+    } finally {
+      await this.silence(guildId);
     }
-    await this.play(session, BELL, soundVolume);
-
-    await this.silence();
   }
 
   private async play(session: VoiceSession, sound: SoundName, volume: number): Promise<void> {
     try {
-      const result = await this.gateway.play(sound, volume);
+      const result = await this.gateway.play(session.guildId, sound, volume);
       if (!result.played) {
         this.logger.warn("cue sound could not be played; the timer is unaffected", {
           guildId: session.guildId,
@@ -146,19 +167,19 @@ export class SessionVoice {
     }
   }
 
-  private async speak(): Promise<void> {
+  private async speak(guildId: string): Promise<void> {
     try {
-      await this.gateway.setSilenced(false);
+      await this.gateway.setSilenced(guildId, false);
     } catch (error) {
-      this.logger.warn("could not unmute for playback", { reason: describe(error) });
+      this.logger.warn("could not unmute for playback", { guildId, reason: describe(error) });
     }
   }
 
-  private async silence(): Promise<void> {
+  private async silence(guildId: string): Promise<void> {
     try {
-      await this.gateway.setSilenced(true);
+      await this.gateway.setSilenced(guildId, true);
     } catch (error) {
-      this.logger.warn("could not mute after playback", { reason: describe(error) });
+      this.logger.warn("could not mute after playback", { guildId, reason: describe(error) });
     }
   }
 }

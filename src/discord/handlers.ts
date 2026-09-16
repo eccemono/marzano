@@ -2,15 +2,15 @@ import { type ChatInputCommandInteraction, type Interaction, MessageFlags } from
 
 import { getChannelConfig } from "../db/config-repository";
 import type { Db } from "../db/database";
-import { deleteActiveSession, getActiveSession, saveActiveSession } from "../db/session-repository";
+import { getActiveSession, saveActiveSession } from "../db/session-repository";
 import { BUILT_IN_DEFAULTS, resolveConfig } from "../domain/config";
 import { SplitError, parseSplit } from "../domain/split";
-import { changeSplit, isStopped, remainingMs, startSession, terminate } from "../domain/timer";
+import { changeSplit, isStopped, remainingMs, startSession } from "../domain/timer";
 import { SPLIT_INPUT_ID, SPLIT_MODAL_ID, buildSplitModal } from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
 import { SESSION_SPLIT_MODAL_ID, authorizeControl } from "./session-controls";
-import type { SessionPresenter } from "./session-presenter";
+import type { SessionRendererPort } from "./session-renderer";
 import type { SessionSupervisor } from "../session/supervisor";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
@@ -29,7 +29,7 @@ import { WizardError, applyChannelWizard, applyGuildDefaultsWizard } from "../co
 
 export interface HandlerDeps {
   db: Db;
-  presenter: SessionPresenter;
+  presenter: SessionRendererPort;
   supervisor: SessionSupervisor;
   uptimeSeconds(): number;
   gatewayLatencyMs(): number;
@@ -284,8 +284,10 @@ async function handleStop(
     return;
   }
 
-  saveActiveSession(deps.db, terminate(session, `stopped by ${interaction.user.id}`));
-  deleteActiveSession(deps.db, guildId);
+  // Stop through the supervisor. Writing the row directly left the stage timer
+  // armed and the bot sitting in the voice channel: the session looked stopped
+  // in the database while it was still running in Discord.
+  await deps.supervisor.stop(guildId, `stopped by ${interaction.user.id}`);
 
   await interaction.reply(ephemeral(`Stopped the session in <#${session.voiceChannelId}>.`));
 }
