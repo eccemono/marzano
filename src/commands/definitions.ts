@@ -29,6 +29,25 @@ const PERIOD_OPTION = {
   ],
 } as const;
 
+/**
+ * The advance-mode option, shared by both configuration surfaces.
+ *
+ * Declared once on purpose. It belongs to two option lists, and duplicating the
+ * literal is how it came to be defined three times in `/configure` - which
+ * Discord rejects outright, taking the whole command set down with it.
+ */
+const ADVANCE_MODE_OPTION = {
+  type: ApplicationCommandOptionType.String,
+  name: "auto",
+  description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
+  required: false,
+  choices: [
+    { name: "auto - every stage advances by itself", value: "auto" },
+    { name: "manual - wait for Continue every time", value: "manual" },
+    { name: "semi - breaks start by themselves, work waits", value: "semi" },
+  ],
+} as const;
+
 const CONFIGURE_OPTIONS = [
   {
     type: ApplicationCommandOptionType.String,
@@ -45,15 +64,10 @@ const CONFIGURE_OPTIONS = [
     max_value: 12,
   },
   {
-    type: ApplicationCommandOptionType.String,
-    name: "auto",
-    description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
+    type: ApplicationCommandOptionType.Boolean,
+    name: "sound",
+    description: "Whether to play sound cues in this channel",
     required: false,
-    choices: [
-      { name: "auto - every stage advances by itself", value: "auto" },
-      { name: "manual - wait for Continue every time", value: "manual" },
-      { name: "semi - breaks start by themselves, work waits", value: "semi" },
-    ],
   },
   {
     type: ApplicationCommandOptionType.Integer,
@@ -63,17 +77,7 @@ const CONFIGURE_OPTIONS = [
     min_value: 0,
     max_value: 100,
   },
-  {
-    type: ApplicationCommandOptionType.String,
-    name: "auto",
-    description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
-    required: false,
-    choices: [
-      { name: "auto - every stage advances by itself", value: "auto" },
-      { name: "manual - wait for Continue every time", value: "manual" },
-      { name: "semi - breaks start by themselves, work waits", value: "semi" },
-    ],
-  },
+  ADVANCE_MODE_OPTION,
   {
     type: ApplicationCommandOptionType.Channel,
     name: "copy_from",
@@ -82,15 +86,10 @@ const CONFIGURE_OPTIONS = [
     channel_types: [ChannelType.GuildVoice],
   },
   {
-    type: ApplicationCommandOptionType.String,
-    name: "auto",
-    description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
+    type: ApplicationCommandOptionType.Boolean,
+    name: "reset",
+    description: "Forget this channel's saved configuration",
     required: false,
-    choices: [
-      { name: "auto - every stage advances by itself", value: "auto" },
-      { name: "manual - wait for Continue every time", value: "manual" },
-      { name: "semi - breaks start by themselves, work waits", value: "semi" },
-    ],
   },
 ] as const;
 
@@ -123,12 +122,7 @@ const DEFAULT_OPTIONS = [
     min_value: 0,
     max_value: 100,
   },
-  {
-    type: ApplicationCommandOptionType.Boolean,
-    name: "auto",
-    description: "Advance to the next stage automatically (off = wait for Continue)",
-    required: false,
-  },
+  ADVANCE_MODE_OPTION,
 ] as const;
 
 /**

@@ -65,6 +65,26 @@ describe("command definitions", () => {
     expect(INFO_COMMAND.name).toBe("info");
   });
 
+  it("gives every command a unique set of option names", () => {
+    // Discord rejects a command whose options repeat a name, and it rejects the
+    // entire registration payload with it - so the bot never reports ready and
+    // the deploy's health check rolls it back. That is exactly how a duplicated
+    // option took production down once; this is the guard that was missing.
+    for (const entry of APPLICATION_COMMANDS) {
+      const options = (entry as CommandShape).options ?? [];
+      const names = options.map((option) => option.name);
+
+      expect(new Set(names).size).toBe(names.length);
+    }
+  });
+
+  it("keeps the configuration options that are easy to lose", () => {
+    // Regression: rewriting the advance-mode option once dropped these two.
+    const names = (command("configure").options ?? []).map((option) => option.name);
+
+    expect(names).toEqual(["split", "cycles", "sound", "volume", "auto", "copy_from", "reset"]);
+  });
+
   it("exposes no subcommands at all any more", () => {
     // The old /pomodoro start|status|... surface is gone, not aliased: two ways
     // to do the same thing is how a command set drifts.
