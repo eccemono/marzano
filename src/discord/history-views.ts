@@ -1,5 +1,10 @@
 import type { MemberTotals } from "../domain/attendance";
-import { formatCredit, periodBounds, type LeaderboardPeriod } from "../domain/attendance";
+import {
+  formatCredit,
+  formatMinutes,
+  periodLabel,
+  type LeaderboardPeriod,
+} from "../domain/attendance";
 import type { SessionEmbed } from "./session-view";
 
 /**
@@ -18,6 +23,8 @@ export interface SummaryInput {
   /** Stage outcomes in order, so counts can be derived. */
   outcomes: readonly { stage: string; outcome: string }[];
   totals: readonly MemberTotals[];
+  /** The guild's monthly leaderboard, shown at the foot of the summary too. */
+  monthlyLeaderboard: readonly MemberTotals[];
 }
 
 const STAGE_NAMES: Record<string, string> = {
@@ -53,24 +60,29 @@ export function buildSummaryEmbed(input: SummaryInput): SessionEmbed {
       ? ["Nobody was in the channel long enough to register."]
       : input.totals.map((total) => {
           const parts = [`**focus** ${formatCredit(total.focusMs)}`];
-          // Break credit is only worth showing when there is some, so a normal
-          // working session's line stays readable.
           if (total.breakMs > 0) parts.push(`**break** ${formatCredit(total.breakMs)}`);
           return `<@${total.userId}> - ${parts.join(", ")}`;
         });
+
+  const ranked = input.monthlyLeaderboard.filter((total) => total.totalMs > 0).slice(0, 5);
+  const month =
+    ranked.length === 0
+      ? "No credited time yet this month."
+      : ranked
+          .map(
+            (total, index) => `${index + 1}. <@${total.userId}> - ${formatMinutes(total.totalMs)}`,
+          )
+          .join("\n");
 
   return {
     title: "\u{1F345} Session summary",
     description: `Ended because ${input.reason}.`,
     fields: [
-      {
-        name: "Duration",
-        value: formatCredit(input.endedAt - input.startedAt),
-        inline: true,
-      },
+      { name: "Duration", value: formatCredit(input.endedAt - input.startedAt), inline: true },
       { name: "Who turned up", value: input.totals.length.toString(), inline: true },
       { name: "Stages", value: lines.join("\n"), inline: false },
       { name: "Attendance", value: attendance.join("\n"), inline: false },
+      { name: "This month so far", value: month, inline: false },
     ],
   };
 }
@@ -81,35 +93,19 @@ export interface LeaderboardInput {
   now: number;
 }
 
-export const PERIOD_LABELS: Record<LeaderboardPeriod, string> = {
-  monthly: "This month",
-  yearly: "This year",
-  "all-time": "All time",
-};
-
 export function buildLeaderboardEmbed(input: LeaderboardInput): SessionEmbed {
   const { period, totals, now } = input;
-
-  const bounds = periodBounds(period, now);
-  const window =
-    bounds === null
-      ? "Everything ever recorded here."
-      : `${new Date(bounds.from).toISOString().slice(0, 10)} to ${new Date(bounds.to - 1)
-          .toISOString()
-          .slice(0, 10)} (UTC)`;
 
   const ranked = totals.filter((total) => total.totalMs > 0).slice(0, 10);
 
   const lines = ranked.map((total, index) => {
     const medal = ["\u{1F947}", "\u{1F948}", "\u{1F949}"][index] ?? `${index + 1}.`;
-    // Focus and break are shown apart and the rank uses the sum, so a
-    // break-heavy total is visible rather than hidden inside one number.
-    return `${medal} <@${total.userId}> - **${formatCredit(total.totalMs)}** (focus ${formatCredit(total.focusMs)}, break ${formatCredit(total.breakMs)})`;
+    return `${medal} <@${total.userId}> - **${formatMinutes(total.totalMs)}**`;
   });
 
   return {
-    title: `\u{1F3C6} Pomodoro leaderboard - ${PERIOD_LABELS[period]}`,
+    title: `\u{1F3C6} Pomodoro leaderboard - ${periodLabel(period, now)}`,
     description: lines.length > 0 ? lines.join("\n") : "No credited Pomodoro time yet.",
-    fields: [{ name: "Period", value: window, inline: false }],
+    fields: [],
   };
 }

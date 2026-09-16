@@ -30,8 +30,11 @@ function request(overrides: Partial<Parameters<typeof authorizeControl>[0]> = {}
 }
 
 describe("requiresConfirmation", () => {
-  it("asks before discarding work in progress", () => {
-    expect(requiresConfirmation("skip")).toBe(true);
+  it("asks only before stopping, not before skipping", () => {
+    // Skipping is the button people press most; a confirmation on every skip
+    // is friction against the common case. Stop still asks, because it discards
+    // the whole session rather than just the current period.
+    expect(requiresConfirmation("skip")).toBe(false);
     expect(requiresConfirmation("stop")).toBe(true);
   });
 
@@ -98,14 +101,11 @@ describe("authorizeControl", () => {
     expect(decision.requiresConfirmation).toBe(true);
   });
 
-  it("holds a skip behind confirmation, then allows it once confirmed", () => {
-    const asked = authorizeControl(request({ action: "skip" }));
-    expect(asked.allowed).toBe(false);
-    expect(asked.requiresConfirmation).toBe(true);
+  it("allows a skip immediately, without a confirmation step", () => {
+    const decision = authorizeControl(request({ action: "skip" }));
 
-    const confirmed = authorizeControl(request({ action: "skip", confirmed: true }));
-    expect(confirmed.allowed).toBe(true);
-    expect(confirmed.requiresConfirmation).toBe(false);
+    expect(decision.allowed).toBe(true);
+    expect(decision.requiresConfirmation).toBe(false);
   });
 
   it("does not let a non-participant satisfy confirmation into a skip", () => {
@@ -141,10 +141,6 @@ describe("button id mapping", () => {
 
 describe("confirmation ids", () => {
   it("round-trips a confirmed action", () => {
-    expect(parseConfirmationId(confirmIdFor("skip"))).toEqual({
-      action: "skip",
-      confirmed: true,
-    });
     expect(parseConfirmationId(confirmIdFor("stop"))).toEqual({
       action: "stop",
       confirmed: true,
@@ -161,6 +157,7 @@ describe("confirmation ids", () => {
   it("rejects a non-confirmable action", () => {
     expect(parseConfirmationId(confirmIdFor("pause"))).toBeNull();
     expect(parseConfirmationId(confirmIdFor("extend"))).toBeNull();
+    expect(parseConfirmationId(confirmIdFor("skip"))).toBeNull();
   });
 
   it("rejects foreign ids", () => {

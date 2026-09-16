@@ -17,6 +17,7 @@ interface ConfigColumns {
   cycles_before_long_break: number | null;
   sound_enabled: number | null;
   sound_volume: number | null;
+  auto_advance: number | null;
 }
 
 interface GuildDefaultsRow extends ConfigColumns {
@@ -51,6 +52,7 @@ function rowToPartial(row: ConfigColumns): PartialConfig {
   }
   if (row.sound_enabled !== null) partial.soundEnabled = row.sound_enabled === 1;
   if (row.sound_volume !== null) partial.soundVolume = row.sound_volume;
+  if (row.auto_advance !== null) partial.autoAdvance = row.auto_advance === 1;
 
   return partial;
 }
@@ -63,6 +65,7 @@ function partialToColumns(partial: PartialConfig): ConfigColumns {
     cycles_before_long_break: partial.cyclesBeforeLongBreak ?? null,
     sound_enabled: partial.soundEnabled === undefined ? null : partial.soundEnabled ? 1 : 0,
     sound_volume: partial.soundVolume ?? null,
+    auto_advance: partial.autoAdvance === undefined ? null : partial.autoAdvance ? 1 : 0,
   };
 }
 
@@ -70,7 +73,7 @@ export function getGuildDefaults(db: Db, guildId: string): PartialConfig | null 
   const row = db
     .prepare(
       `SELECT focus_minutes, short_break_minutes, long_break_minutes,
-              cycles_before_long_break, sound_enabled, sound_volume, updated_at
+              cycles_before_long_break, sound_enabled, sound_volume, auto_advance, updated_at
          FROM guild_defaults
         WHERE guild_id = ?`,
     )
@@ -86,10 +89,10 @@ export function saveGuildDefaults(db: Db, guildId: string, partial: PartialConfi
   db.prepare(
     `INSERT INTO guild_defaults (
        guild_id, focus_minutes, short_break_minutes, long_break_minutes,
-       cycles_before_long_break, sound_enabled, sound_volume, updated_at
+       cycles_before_long_break, sound_enabled, sound_volume, auto_advance, updated_at
      ) VALUES (
        @guild_id, @focus_minutes, @short_break_minutes, @long_break_minutes,
-       @cycles_before_long_break, @sound_enabled, @sound_volume, @updated_at
+       @cycles_before_long_break, @sound_enabled, @sound_volume, @auto_advance, @updated_at
      )
      ON CONFLICT (guild_id) DO UPDATE SET
        focus_minutes            = excluded.focus_minutes,
@@ -98,6 +101,7 @@ export function saveGuildDefaults(db: Db, guildId: string, partial: PartialConfi
        cycles_before_long_break = excluded.cycles_before_long_break,
        sound_enabled            = excluded.sound_enabled,
        sound_volume             = excluded.sound_volume,
+       auto_advance             = excluded.auto_advance,
        updated_at               = excluded.updated_at`,
   ).run({
     guild_id: guildId,
@@ -118,7 +122,7 @@ export function getChannelConfig(
   const row = db
     .prepare(
       `SELECT focus_minutes, short_break_minutes, long_break_minutes,
-              cycles_before_long_break, sound_enabled, sound_volume,
+              cycles_before_long_break, sound_enabled, sound_volume, auto_advance,
               configured_by, updated_at
          FROM channel_configs
         WHERE guild_id = ? AND voice_channel_id = ?`,
@@ -148,10 +152,10 @@ export function saveChannelConfig(
   db.prepare(
     `INSERT INTO channel_configs (
        guild_id, voice_channel_id, focus_minutes, short_break_minutes, long_break_minutes,
-       cycles_before_long_break, sound_enabled, sound_volume, configured_by, updated_at
+       cycles_before_long_break, sound_enabled, sound_volume, auto_advance, configured_by, updated_at
      ) VALUES (
        @guild_id, @voice_channel_id, @focus_minutes, @short_break_minutes, @long_break_minutes,
-       @cycles_before_long_break, @sound_enabled, @sound_volume, @configured_by, @updated_at
+       @cycles_before_long_break, @sound_enabled, @sound_volume, @auto_advance, @configured_by, @updated_at
      )
      ON CONFLICT (guild_id, voice_channel_id) DO UPDATE SET
        focus_minutes            = excluded.focus_minutes,
@@ -160,6 +164,7 @@ export function saveChannelConfig(
        cycles_before_long_break = excluded.cycles_before_long_break,
        sound_enabled            = excluded.sound_enabled,
        sound_volume             = excluded.sound_volume,
+       auto_advance             = excluded.auto_advance,
        configured_by            = excluded.configured_by,
        updated_at               = excluded.updated_at`,
   ).run({

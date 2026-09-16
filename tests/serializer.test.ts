@@ -21,6 +21,7 @@ function newSession(): TimerSession {
       cyclesBeforeLongBreak: 4,
       soundEnabled: true,
       soundVolume: 80,
+      autoAdvance: true,
     },
     now: T0,
   });

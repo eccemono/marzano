@@ -34,6 +34,11 @@ export interface TimerSession {
   stageEndsAt: number | null;
   /** Exact remainder captured at the moment of pausing. */
   pausedRemainingMs: number | null;
+  /**
+   * True when the session is held at a stage boundary in manual mode, waiting
+   * for someone to press Continue. Distinct from a user pause mid-stage.
+   */
+  awaitingContinue: boolean;
   /** Focus stages finished since the session began. */
   completedFocusStages: number;
   config: PomodoroConfig;
@@ -94,6 +99,7 @@ export function startSession(options: StartOptions): TimerSession {
     stageStartedAt: now,
     stageEndsAt: now + stageDurationMs("focus", config),
     pausedRemainingMs: null,
+    awaitingContinue: false,
     completedFocusStages: 0,
     config,
     stopReason: null,
@@ -200,6 +206,19 @@ export function advance(
       stageStartedAt: boundary,
       stageEndsAt: boundary + stageDurationMs(next.stage, current.config),
     };
+
+    if (!current.config.autoAdvance) {
+      // Manual mode: the next stage is queued and the bell has rung, but the
+      // clock must not start until someone presses Continue.
+      current = {
+        ...current,
+        state: "paused",
+        awaitingContinue: true,
+        pausedRemainingMs: stageDurationMs(current.stage, current.config),
+        stageEndsAt: null,
+      };
+      break;
+    }
   }
 
   return { session: current, transitions, truncated: false };
@@ -227,6 +246,7 @@ export function resume(session: TimerSession, now: number): TimerSession {
   return {
     ...session,
     state: "running",
+    awaitingContinue: false,
     pausedRemainingMs: null,
     // Keep elapsed time coherent by back-dating the stage start.
     stageStartedAt: now - Math.max(0, duration - remaining),
@@ -263,6 +283,7 @@ export function skip(
       stage: next.stage,
       completedFocusStages: next.completedFocusStages,
       state: "running",
+      awaitingContinue: false,
       pausedRemainingMs: null,
       stageStartedAt: now,
       stageEndsAt: now + stageDurationMs(next.stage, session.config),

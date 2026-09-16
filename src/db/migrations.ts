@@ -155,6 +155,18 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec(SCHEMA_V2);
     },
   },
+  {
+    version: 3,
+    name: "manual advance: auto_advance setting and awaiting_continue flag",
+    up(db) {
+      db.exec(`
+        ALTER TABLE guild_defaults  ADD COLUMN auto_advance INTEGER;
+        ALTER TABLE channel_configs ADD COLUMN auto_advance INTEGER;
+        ALTER TABLE active_sessions ADD COLUMN auto_advance INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE active_sessions ADD COLUMN awaiting_continue INTEGER NOT NULL DEFAULT 0;
+      `);
+    },
+  },
 ];
 
 const CREATE_MIGRATION_TABLE = `

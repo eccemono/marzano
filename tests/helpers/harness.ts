@@ -181,7 +181,7 @@ export function newSession(overrides: Partial<TimerSession> = {}): TimerSession 
       guildId: GUILD,
       voiceChannelId: CHANNEL,
       textChannelId: CHANNEL,
-      config: { ...BUILT_IN_DEFAULTS, focusMinutes: 25, shortBreakMinutes: 5 },
+      config: { ...BUILT_IN_DEFAULTS, focusMinutes: 25, shortBreakMinutes: 5, autoAdvance: true },
       now: START,
     }),
     ...overrides,

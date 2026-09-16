@@ -410,6 +410,7 @@ describe("summary and leaderboard views", () => {
         { stage: "short_break", outcome: "completed" },
       ],
       totals,
+      monthlyLeaderboard: [],
     });
 
     expect(embed.description).toContain("everyone left the voice channel");
@@ -424,6 +425,7 @@ describe("summary and leaderboard views", () => {
       endedAt: T0 + HOUR,
       outcomes: [],
       totals,
+      monthlyLeaderboard: [],
     });
 
     const attendance = embed.fields.find((field) => field.name === "Attendance")?.value ?? "";
@@ -435,9 +437,17 @@ describe("summary and leaderboard views", () => {
   it("marks the top three in the leaderboard and ranks by the combined total", () => {
     const embed = buildLeaderboardEmbed({ period: "monthly", totals, now: T0 });
 
-    expect(embed.title).toContain("This month");
+    expect(embed.title).toContain("Pomodoro leaderboard");
     expect(embed.description.indexOf(ALICE)).toBeLessThan(embed.description.indexOf(BOB));
     expect(embed.description).toContain("\u{1F947}");
+  });
+
+  it("shows the total in minutes, without the focus/break split", () => {
+    const embed = buildLeaderboardEmbed({ period: "monthly", totals, now: T0 });
+
+    expect(embed.description).toContain("60 min");
+    expect(embed.description).not.toContain("focus 50m");
+    expect(embed.description).not.toContain("break 10m");
   });
 
   it("says so when there is nothing to rank", () => {
@@ -446,9 +456,34 @@ describe("summary and leaderboard views", () => {
     expect(embed.description).toContain("No credited Pomodoro time yet");
   });
 
-  it("names the period it is showing", () => {
+  it("names the period it is showing in natural language", () => {
     const embed = buildLeaderboardEmbed({ period: "monthly", totals, now: Date.UTC(2026, 8, 16) });
 
-    expect(embed.fields[0]?.value).toContain("2026-09-01");
+    expect(embed.title).toContain("September 2026");
+  });
+
+  it("names the year naturally too", () => {
+    expect(
+      buildLeaderboardEmbed({ period: "yearly", totals, now: Date.UTC(2026, 3, 1) }).title,
+    ).toContain("2026");
+    expect(buildLeaderboardEmbed({ period: "all-time", totals, now: T0 }).title).toContain(
+      "All time",
+    );
+  });
+
+  it("shows the monthly leaderboard on the summary", () => {
+    const embed = buildSummaryEmbed({
+      reason: "stopped",
+      startedAt: T0,
+      endedAt: T0 + HOUR,
+      outcomes: [],
+      totals,
+      monthlyLeaderboard: totals,
+    });
+
+    const month = embed.fields.find((field) => field.name === "This month so far")?.value ?? "";
+
+    expect(month).toContain("60 min");
+    expect(month).toContain(`<@${ALICE}>`);
   });
 });

@@ -21,14 +21,17 @@ import {
 
 export function buildSessionComponents(session: TimerSession): ActionRowBuilder<ButtonBuilder>[] {
   const paused = isPaused(session);
+  const awaiting = session.awaitingContinue === true;
   const stopped = isStopped(session);
   const disabled = stopped;
+
+  const primary = awaiting ? "Continue" : paused ? "Resume" : "Pause";
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(SESSION_BUTTON_IDS.pauseResume)
-      .setLabel(paused ? "Resume" : "Pause")
-      .setStyle(paused ? ButtonStyle.Success : ButtonStyle.Secondary)
+      .setLabel(primary)
+      .setStyle(awaiting || paused ? ButtonStyle.Success : ButtonStyle.Secondary)
       .setDisabled(disabled),
     new ButtonBuilder()
       .setCustomId(SESSION_BUTTON_IDS.skip)
