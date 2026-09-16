@@ -30,6 +30,7 @@ import {
 } from "./session-controls";
 import type { SessionPresenter } from "./session-presenter";
 import { buildSplitModal, formatSplit } from "./modals";
+import type { SessionVoice } from "../voice/manager";
 
 /**
  * The session control buttons.
@@ -44,6 +45,7 @@ import { buildSplitModal, formatSplit } from "./modals";
 export interface SessionButtonDeps {
   db: Db;
   presenter: SessionPresenter;
+  voice: SessionVoice;
   voiceChannelIdOf(interaction: ButtonInteraction): string | null;
 }
 
@@ -180,8 +182,17 @@ export async function handleSessionButton(
 
   if (applied.remove) {
     deleteActiveSession(deps.db, guildId);
+    // Leave the voice channel as part of stopping, otherwise the bot would sit
+    // in the channel indefinitely after the session it was there for ended.
+    void deps.voice.leave();
   } else {
     saveActiveSession(deps.db, applied.session);
+
+    // A skip moves the session into a new stage, so it gets the bell. Not
+    // awaited: audio must not delay the acknowledgement.
+    if (resolved === "skip") {
+      void deps.voice.announceTransition(applied.session);
+    }
   }
 
   const rendered = await deps.presenter.render(applied.session);

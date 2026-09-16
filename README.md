@@ -33,8 +33,11 @@ anyone having to watch a clock.
 ## Requirements
 
 - **Node.js 22.x** - pinned in `.nvmrc` and asserted at startup.
-- **FFmpeg** on the host, for voice audio transcoding.
 - A Discord application with a bot user.
+
+FFmpeg is **not** required. Cue sounds are pre-encoded to Opus in-process, so
+the audio path has no external binary in it and cannot fail because a host is
+missing one. See [Cue sounds](#cue-sounds).
 
 ### Why Node 22 specifically
 
@@ -123,19 +126,86 @@ Splits can be typed flexibly:
 - **Sounds come from generated assets.** No third-party audio is bundled, so the
   bells are synthesised by a script in this repository.
 
+## Cue sounds
+
+The bells are **generated, not bundled**. `assets/sounds/start.wav` and
+`assets/sounds/bell.wav` are the reproducible output of a script in this
+repository, so there is no third-party audio to license and no opaque binary of
+unknown provenance in the tree.
+
+```bash
+npm run sounds      # regenerates assets/sounds/*.wav
+```
+
+The synthesis is pure arithmetic - summed sine partials under an exponential
+decay envelope - with no randomness and no reliance on the platform audio
+stack. Regenerating always produces byte-identical files, and a test asserts
+that the committed files match what the generator produces, which is what keeps
+them honest rather than arbitrary.
+
+| Sound | Played | Length |
+| --- | --- | --- |
+| `start.wav` | Once, at session start, before the first bell | 1.10 s |
+| `bell.wav` | At every stage boundary, including the first | 2.00 s |
+
+Later stage transitions play the bell **only**. The start cue is never replayed
+mid-session, so a break beginning always sounds different from a session
+beginning.
+
+### No FFmpeg
+
+`@discordjs/voice` can transmit Opus packets directly, so Marzano encodes the
+cue sounds to Opus in-process with the pure-JS `opusscript` encoder and sends
+them as `StreamType.Opus`. FFmpeg is never invoked and is not installed on the
+production host.
+
+`opusscript` is chosen over a native binding precisely because it has no
+prebuilt-ABI requirement: a Node major upgrade cannot break it, and it cannot
+fail on a server whose architecture has no prebuilt binary.
+
+Two consequences worth stating plainly:
+
+- **Volume is applied before encoding.** Each (sound, volume) pair is encoded
+  once and cached, so a volume change costs one encode rather than one per
+  playback.
+- **Every audio failure ends in a log line, not an exception.** A missing asset,
+  an unusable encoder or a dropped voice connection degrades to silence. The
+  timer is independent of audio and is never blocked or failed by it.
+
 ## Architecture
 
 ```
 src/
-  index.ts        entry point: validates runtime and configuration
-  runtime.ts      build identity and the Node major guard
-  logger.ts       structured JSON logging with mandatory secret redaction
-  config/env.ts   environment loading and validation
-tests/            vitest suites for the above
+  index.ts            entry point: validates runtime and configuration
+  runtime.ts          build identity and the Node major guard
+  logger.ts           structured JSON logging with mandatory secret redaction
+  config/env.ts       environment loading and validation
+  commands/           slash command definitions, wizard flows, /info
+  db/                 SQLite migrations and repositories
+  domain/             pure, Discord-free logic (no I/O)
+    split.ts            split parsing and validation
+    config.ts           layered configuration precedence
+    timer.ts            timestamp-based session state machine
+    serializer.ts       per-guild serialization of state changes
+  discord/            thin presentation layer
+    handlers.ts         interaction routing
+    session-view.ts     status embed rendering
+    session-controls.ts control authorization rules
+  voice/              audio, behind an interface
+    wav.ts              minimal RIFF/WAVE read and write
+    tones.ts            deterministic synthesis
+    opus.ts             PCM to Opus, pure JS
+    sounds.ts           cached, volume-aware sound library
+    gateway.ts          the @discordjs/voice boundary
+    manager.ts          join/play/leave orchestration
+assets/sounds/        generated cue sounds
+scripts/              the sound generator
+tests/                vitest suites
 ```
 
-Planned additions follow the same split: a pure, Discord-free timer domain, a
-persistence layer, and a thin Discord presentation layer.
+The split is deliberate: everything under `domain/` and `voice/` is testable
+without a Discord connection, and `discord/` is kept thin enough to be reviewed
+by reading.
 
 ## Deployment
 
