@@ -23,6 +23,10 @@ export interface AppConfig {
   soundsDir: string;
   /** Kept so the FFmpeg path can be supplied; the audio path no longer needs it. */
   ffmpegPath: string;
+  /** Bound on graceful shutdown, in milliseconds. */
+  shutdownTimeoutMs: number;
+  /** How long the last participant can be absent before a session ends. */
+  graceMs: number;
   /** When set, slash commands register in this guild only (instant updates). */
   devGuildId: string | null;
 }
@@ -33,6 +37,8 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const DEFAULT_DATA_DIR = "./data";
 const DEFAULT_SOUNDS_DIR = "./assets/sounds";
 const DEFAULT_FFMPEG_PATH = "ffmpeg";
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
+const DEFAULT_GRACE_MS = 60_000;
 const DEFAULT_LOG_LEVEL: LogLevel = "info";
 
 function requiredValue(env: NodeJS.ProcessEnv, key: string): string {
@@ -71,6 +77,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
+  const shutdownRaw = (env.SHUTDOWN_TIMEOUT_MS ?? "").trim();
+  const shutdownTimeoutMs =
+    shutdownRaw.length > 0 ? Number(shutdownRaw) : DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  if (!Number.isFinite(shutdownTimeoutMs) || shutdownTimeoutMs <= 0) {
+    throw new ConfigError(
+      "SHUTDOWN_TIMEOUT_MS must be a positive number of milliseconds when set.",
+    );
+  }
+
+  const graceRaw = (env.GRACE_MS ?? "").trim();
+  const graceMs = graceRaw.length > 0 ? Number(graceRaw) : DEFAULT_GRACE_MS;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new ConfigError("GRACE_MS must be zero or a positive number of milliseconds when set.");
+  }
+
   const devGuildId = (env.DEV_GUILD_ID ?? "").trim();
   if (devGuildId.length > 0 && !SNOWFLAKE.test(devGuildId)) {
     throw new ConfigError("DEV_GUILD_ID must be a Discord snowflake when set.");
@@ -83,6 +104,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     dataDir: (env.DATA_DIR ?? "").trim() || DEFAULT_DATA_DIR,
     soundsDir: (env.SOUNDS_DIR ?? "").trim() || DEFAULT_SOUNDS_DIR,
     ffmpegPath: (env.FFMPEG_PATH ?? "").trim() || DEFAULT_FFMPEG_PATH,
+    shutdownTimeoutMs,
+    graceMs,
     devGuildId: devGuildId.length > 0 ? devGuildId : null,
   };
 }

@@ -11,7 +11,7 @@ import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
 import { SESSION_SPLIT_MODAL_ID, authorizeControl } from "./session-controls";
 import type { SessionPresenter } from "./session-presenter";
-import type { SessionVoice } from "../voice/manager";
+import type { SessionSupervisor } from "../session/supervisor";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import { INFO_COMMAND, POMODORO_COMMAND, type PomodoroSubcommand } from "../commands/definitions";
@@ -30,7 +30,7 @@ import { WizardError, applyChannelWizard, applyGuildDefaultsWizard } from "../co
 export interface HandlerDeps {
   db: Db;
   presenter: SessionPresenter;
-  voice: SessionVoice;
+  supervisor: SessionSupervisor;
   uptimeSeconds(): number;
   gatewayLatencyMs(): number;
   guildCount(): number;
@@ -127,15 +127,11 @@ async function handleStart(
   saveActiveSession(deps.db, session);
 
   // Post the canonical status message and remember its id, so later refreshes
-  // edit this one instead of posting duplicates.
+  // edit this one instead of posting duplicates. The supervisor then adopts the
+  // session: it persists, schedules the first stage wake, and plays the cue.
   const rendered = await deps.presenter.render(session);
   const started = { ...session, statusMessageId: rendered.messageId };
-  saveActiveSession(deps.db, started);
-
-  // Audio is decorative and can be slow, so it is deliberately not awaited: a
-  // sluggish voice join must never delay the command acknowledgement, and a
-  // failed one must never fail the session.
-  void deps.voice.announceStart(started);
+  await deps.supervisor.begin(started);
 
   await interaction.reply(
     ephemeral(
@@ -338,6 +334,10 @@ async function handleSessionSplitModal(interaction: Interaction, deps: HandlerDe
       saveActiveSession(deps.db, { ...updated, statusMessageId: rendered.messageId });
     }
 
+    // The split change applies from the next stage, but re-arming keeps the
+    // supervisor's view of the deadline authoritative.
+    deps.supervisor.reschedule(guildId);
+
     await interaction.reply(
       ephemeral(
         `Split changed for this session: focus ${split.focusMinutes}m, short break ${split.shortBreakMinutes}m, long break ${split.longBreakMinutes}m. The current stage keeps its remaining time.`,
@@ -402,7 +402,7 @@ export async function handleInteraction(
     await handleSessionButton(interaction, {
       db: deps.db,
       presenter: deps.presenter,
-      voice: deps.voice,
+      supervisor: deps.supervisor,
       voiceChannelIdOf: callerVoiceChannelId,
     });
     return;
