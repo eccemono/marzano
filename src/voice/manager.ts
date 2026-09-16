@@ -39,16 +39,41 @@ export interface VoiceSession {
 export interface SessionVoiceOptions {
   gateway: VoiceGateway;
   logger: Logger;
+  /**
+   * Beat between a work cue and the self-deafen.
+   *
+   * Tests pass 0 so playback assertions do not wait on real time.
+   */
+  deafenCushionMs?: number;
+}
+
+/**
+ * A beat between a work cue and the self-deafen.
+ *
+ * Deafening is the non-verbal "heads down, earphones on" signal for everyone
+ * else in the channel, so it lands after the cue has been heard rather than
+ * talking over it.
+ */
+export const DEAFEN_CUSHION_MS = 3_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const handle = setTimeout(resolve, ms);
+    // Never hold the process open purely for a cushion.
+    if (typeof handle.unref === "function") handle.unref();
+  });
 }
 
 export class SessionVoice {
   private readonly gateway: VoiceGateway;
   private readonly logger: Logger;
+  private readonly deafenCushionMs: number;
   private readonly joined = new Map<string, string>();
 
   constructor(options: SessionVoiceOptions) {
     this.gateway = options.gateway;
     this.logger = options.logger;
+    this.deafenCushionMs = options.deafenCushionMs ?? DEAFEN_CUSHION_MS;
   }
 
   /** The channel currently joined in a guild, or null. */
@@ -89,16 +114,45 @@ export class SessionVoice {
   /** The join cue, played once when the bot joins a session's channel. */
   async announceStart(session: VoiceSession): Promise<void> {
     await this.announce(session, JOIN_CUE);
+    // The first work period is about to begin, so take the same cue as any
+    // other work period does.
+    await this.deafenForWork(session.guildId);
   }
 
   /**
    * The boundary cue for the stage that has just begun.
    *
    * A work period and a break deliberately sound different - one means "start",
-   * the other "stop and rest" - so they are tellable apart without looking.
+   * the other "stop and rest" - so they are tellable apart without looking. The
+   * bot also deafens itself for a work period and undeafens for a break, which
+   * is a cue the others in the channel can see rather than hear.
    */
   async announceTransition(session: VoiceSession): Promise<void> {
-    await this.announce(session, session.stage === "focus" ? WORK_CUE : BREAK_CUE);
+    const working = session.stage === "focus";
+    await this.announce(session, working ? WORK_CUE : BREAK_CUE);
+
+    if (working) await this.deafenForWork(session.guildId);
+    else await this.setDeafened(session.guildId, false);
+  }
+
+  /** Deafen after the cushion, so the cue is not talking over the cue. */
+  private async deafenForWork(guildId: string): Promise<void> {
+    if (this.deafenCushionMs > 0) await sleep(this.deafenCushionMs);
+    await this.setDeafened(guildId, true);
+  }
+
+  private async setDeafened(guildId: string, deafened: boolean): Promise<void> {
+    try {
+      await this.gateway.setSilenced(guildId, deafened);
+    } catch (error) {
+      // Audio state is a nicety: a refused voice-state change must not fail a
+      // session, and the gateway contract says this does not reject anyway.
+      this.logger.warn("could not change the bot's own deafen state", {
+        guildId,
+        deafened,
+        reason: describe(error),
+      });
+    }
   }
 
   /**

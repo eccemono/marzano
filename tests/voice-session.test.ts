@@ -83,21 +83,24 @@ function newSession(overrides: Partial<VoiceSession> = {}): VoiceSession {
 
 function setup() {
   const gateway = new FakeGateway();
-  const voice = new SessionVoice({ gateway, logger: silentLogger() });
+  // No real cushion: the delay is behaviour, but waiting three seconds per test
+  // is not.
+  const voice = new SessionVoice({ gateway, logger: silentLogger(), deafenCushionMs: 0 });
   return { gateway, voice };
 }
 
 describe("session start", () => {
-  it("joins and plays the join cue, with no self-state toggling", async () => {
+  it("joins, plays the join cue, then deafens for the work period", async () => {
     const { gateway, voice } = setup();
 
     await voice.announceStart(newSession());
 
-    // No mute/deafen toggling around playback: the join is fully open and the
-    // bot simply plays. The toggling is exactly what broke audio in production.
+    // No mute dance around playback: the bot plays fully open, then deafens
+    // itself once, which is the visible "heads down" cue for everyone else.
     expect(gateway.calls).toEqual([
       `join:${GUILD}:222222222222222222`,
       `play:${GUILD}:${JOIN_CUE}:80`,
+      `silenced:${GUILD}:true`,
     ]);
   });
 
@@ -109,14 +112,17 @@ describe("session start", () => {
     expect(gateway.silenced).toBe(true);
   });
 
-  it("never toggles the bot's own state around playback", async () => {
-    // The old implementation muted and unmuted around every cue. That dance is
-    // gone: the bot stays fully open and just does not play between bells.
+  it("deafens for a work period and undeafens for a break", async () => {
+    // The deafen is a cue for the rest of the channel, so it has to track the
+    // stage: on for work, off for the break.
     const { gateway, voice } = setup();
 
-    await voice.announceStart(newSession());
+    await voice.announceTransition(newSession({ stage: "focus" }));
+    expect(gateway.calls).toContain(`silenced:${GUILD}:true`);
 
-    expect(gateway.calls.some((call) => call.startsWith("silenced:"))).toBe(false);
+    gateway.calls.length = 0;
+    await voice.announceTransition(newSession({ stage: "short_break" }));
+    expect(gateway.calls).toContain(`silenced:${GUILD}:false`);
   });
 });
 
@@ -286,7 +292,7 @@ describe("resilience", () => {
     gateway.play = async () => {
       throw new Error("unexpected");
     };
-    const voice = new SessionVoice({ gateway, logger: silentLogger() });
+    const voice = new SessionVoice({ gateway, logger: silentLogger(), deafenCushionMs: 0 });
 
     await expect(voice.announceStart(newSession())).resolves.toBeUndefined();
     expect(gateway.silenced).toBe(true);
@@ -297,14 +303,14 @@ describe("resilience", () => {
     gateway.setSilenced = async () => {
       throw new Error("voice state unavailable");
     };
-    const voice = new SessionVoice({ gateway, logger: silentLogger() });
+    const voice = new SessionVoice({ gateway, logger: silentLogger(), deafenCushionMs: 0 });
 
     await expect(voice.announceStart(newSession())).resolves.toBeUndefined();
   });
 
   it("leaves cleanly even if the gateway throws on leave", async () => {
     const gateway = new FakeGateway();
-    const voice = new SessionVoice({ gateway, logger: silentLogger() });
+    const voice = new SessionVoice({ gateway, logger: silentLogger(), deafenCushionMs: 0 });
 
     await voice.announceStart(newSession());
     gateway.leave = () => {
@@ -350,7 +356,7 @@ describe("non-blocking", () => {
       gateway.connectedGuilds.add(guildId);
     };
 
-    const voice = new SessionVoice({ gateway, logger: silentLogger() });
+    const voice = new SessionVoice({ gateway, logger: silentLogger(), deafenCushionMs: 0 });
     let settled = false;
     const pending = voice.announceStart(newSession()).then(() => {
       settled = true;
