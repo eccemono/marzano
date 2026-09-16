@@ -192,6 +192,23 @@ describe("successful deploy", () => {
     expect(calls.some((call) => call.includes("run build"))).toBe(true);
   });
 
+  it("installs the full dependency tree, builds, then prunes", () => {
+    // `tsc` is a devDependency, so installing with --omit=dev first would make
+    // the build fail with "tsc: not found" on every deploy.
+    const sandbox = createSandbox();
+    runDeploy(sandbox);
+
+    const calls = callsOf(sandbox);
+    const install = calls.findIndex((call) => call.startsWith("npm ci"));
+    const build = calls.findIndex((call) => call.includes("run build"));
+    const prune = calls.findIndex((call) => call.includes("npm prune"));
+
+    expect(calls[install]).not.toContain("--omit=dev");
+    expect(install).toBeLessThan(build);
+    expect(build).toBeLessThan(prune);
+    expect(calls[prune]).toContain("--omit=dev");
+  });
+
   it("reloads the marzano process and nothing else", () => {
     const sandbox = createSandbox();
     runDeploy(sandbox);
