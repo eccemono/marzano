@@ -9,7 +9,8 @@ import {
   APPLICATION_COMMANDS,
   INFO_COMMAND,
   POMODORO_COMMAND,
-  POMODORO_SUBCOMMANDS,
+  START_COMMAND,
+  START_COMMANDS,
 } from "../src/commands/definitions";
 import { buildInfoEmbed, formatUptime } from "../src/commands/info";
 import { commandPayload } from "../src/commands/register";
@@ -33,25 +34,53 @@ interface CommandShape {
   options?: OptionShape[];
 }
 
-const pomodoro = POMODORO_COMMAND as unknown as CommandShape;
-
-function subcommand(name: string): OptionShape {
-  const found = pomodoro.options?.find((option) => option.name === name);
-  if (!found) throw new Error(`missing subcommand ${name}`);
+function command(name: string): CommandShape {
+  const found = (APPLICATION_COMMANDS as readonly CommandShape[]).find(
+    (entry) => entry.name === name,
+  );
+  if (!found) throw new Error(`missing command ${name}`);
   return found;
 }
 
-function optionOf(sub: string, name: string): OptionShape {
-  const found = subcommand(sub).options?.find((option) => option.name === name);
-  if (!found) throw new Error(`missing option ${name} on ${sub}`);
+function optionOf(commandName: string, name: string): OptionShape {
+  const found = command(commandName).options?.find((option) => option.name === name);
+  if (!found) throw new Error(`missing option ${name} on ${commandName}`);
   return found;
 }
 
 describe("command definitions", () => {
-  it("declares exactly the agreed surface", () => {
-    expect(APPLICATION_COMMANDS.map((command) => command.name)).toEqual(["pomodoro", "info"]);
-    expect(pomodoro.options?.map((option) => option.name)).toEqual([...POMODORO_SUBCOMMANDS]);
+  it("declares exactly the agreed surface, as top-level commands", () => {
+    expect(APPLICATION_COMMANDS.map((entry) => entry.name)).toEqual([
+      "pomodoro",
+      "start",
+      "status",
+      "configure",
+      "default",
+      "stop",
+      "leaderboard",
+      "info",
+    ]);
     expect(INFO_COMMAND.name).toBe("info");
+  });
+
+  it("exposes no subcommands at all any more", () => {
+    // The old /pomodoro start|status|... surface is gone, not aliased: two ways
+    // to do the same thing is how a command set drifts.
+    for (const entry of APPLICATION_COMMANDS) {
+      const options = (entry as CommandShape).options ?? [];
+      const subcommands = options.filter(
+        (option) => option.type === ApplicationCommandOptionType.Subcommand,
+      );
+      expect(subcommands).toEqual([]);
+    }
+  });
+
+  it("treats /pomodoro and /start as the same command", () => {
+    expect(START_COMMANDS).toEqual(["pomodoro", "start"]);
+    expect(START_COMMAND.description).toContain("same as /pomodoro");
+
+    // Identical option shape, so neither can drift from the other.
+    expect(START_COMMAND.options).toEqual(POMODORO_COMMAND.options);
   });
 
   it("uses only lowercase names within Discord's length limits", () => {
@@ -63,7 +92,7 @@ describe("command definitions", () => {
   });
 
   it("defines start with an optional split override", () => {
-    const split = optionOf("start", "split");
+    const split = optionOf("pomodoro", "split");
 
     expect(split.type).toBe(ApplicationCommandOptionType.String);
     expect(split.required).toBe(false);
@@ -87,7 +116,7 @@ describe("command definitions", () => {
   });
 
   it("offers reset but not copy_from on the guild defaults wizard", () => {
-    const names = subcommand("default").options?.map((option) => option.name) ?? [];
+    const names = command("default").options?.map((option) => option.name) ?? [];
 
     expect(names).not.toContain("copy_from");
     expect(names).not.toContain("reset");

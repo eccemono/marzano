@@ -104,7 +104,25 @@ jobs:
               -o UserKnownHostsFile=deploy/known_hosts \
               -o StrictHostKeyChecking=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "DEPLOY_BRANCH='${{ inputs.ref }}' bash -s" < scripts/deploy-hetzner.sh
+              "DEPLOY_BRANCH='${{ inputs.ref }}' MARZANO_APP_DIR='${{ vars.MARZANO_APP_DIR }}' MARZANO_DATA_DIR='${{ vars.MARZANO_DATA_DIR }}' bash -s" < scripts/deploy-hetzner.sh
+
+      - name: Check the deploy paths are configured
+        env:
+          APP_DIR: ${{ vars.MARZANO_APP_DIR }}
+          DATA_DIR: ${{ vars.MARZANO_DATA_DIR }}
+        run: |
+          # The script's own gate refuses to guess a path on a shared host, which
+          # is right - but it can only report that after connecting and starting
+          # a deploy. Checking here turns a mid-deploy abort into an obvious
+          # configuration error before anything is touched.
+          missing=0
+          for name in APP_DIR DATA_DIR; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository variable ${name} is not set. Set MARZANO_APP_DIR and MARZANO_DATA_DIR under Settings > Secrets and variables > Actions > Variables."
+              missing=1
+            fi
+          done
+          exit "$missing"
 
       - name: Summarise
         if: always()

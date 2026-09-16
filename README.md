@@ -152,12 +152,26 @@ back to the saved channel configuration.
 
 | Command | Who | What it does |
 | --- | --- | --- |
-| `/pomodoro start [split]` | VC participants | Starts a cycle in the voice channel you are in. |
-| `/pomodoro status` | anyone | Shows the current stage, cycle and remaining time. |
-| `/pomodoro configure` | Manage Channels | Sets the split, sound and volume for this channel. |
-| `/pomodoro default` | Manage Guild | Server-wide defaults for newly configured channels. |
-| `/pomodoro stop` | VC participants | Ends the session. |
+| `/pomodoro [split]` | VC participants | Starts a cycle in the voice channel you are in. |
+| `/start [split]` | VC participants | Exactly the same command, under the name people instinctively try. |
+| `@Marzano` | VC participants | Also starts a session. No prefix, and no Message Content intent. |
+| `/status` | anyone | Shows the current stage, cycle and remaining time. |
+| `/configure` | Manage Channels | Sets the split, sound and volume for this channel. |
+| `/default` | Manage Guild | Server-wide defaults for newly configured channels. |
+| `/stop` | VC participants | Ends the session and posts the summary. |
+| `/leaderboard [period]` | anyone | Monthly, yearly or all-time time in Pomodoro. |
 | `/info` | anyone | Version, uptime, latency and a link to this repository. |
+
+`/pomodoro` and `/start` are deliberately two names for one action: starting a
+session is what people type most, and making them pick a subcommand first was
+friction for no benefit. Passing a split (`/pomodoro 50 10 5`) always overrides
+the channel's saved settings for that session only.
+
+Mentioning the bot works because `GuildMessages` is enabled — that is a
+**non-privileged** intent that delivers the message event and the mention
+metadata, but *not* the message text. Discord only fills in `message.content`
+if the privileged Message Content intent is also on. A `!pomodoro` prefix would
+require that privileged intent, which is exactly why there isn't one.
 
 Session controls are buttons on the status message rather than commands, and
 every press re-checks that you are in the session's voice channel.
