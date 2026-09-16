@@ -26,7 +26,7 @@ import {
 import {
   CONFIG_INPUT_IDS,
   CONFIGURE_MODAL_ID,
-  DEFAULT_MODAL_ID,
+  SETTINGS_MODAL_ID,
   SPLIT_INPUT_ID,
   SPLIT_MODAL_ID,
   buildConfigModal,
@@ -54,7 +54,7 @@ import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import {
   CONFIGURE_COMMAND,
-  DEFAULT_COMMAND,
+  SETTINGS_COMMAND,
   INFO_COMMAND,
   LEADERBOARD_COMMAND,
   PERIODS,
@@ -396,7 +396,7 @@ async function handleConfigure(
   }
 }
 
-async function handleDefault(
+async function handleSettings(
   interaction: ChatInputCommandInteraction,
   deps: HandlerDeps,
 ): Promise<void> {
@@ -408,7 +408,7 @@ async function handleDefault(
 
   const permissions = interaction.memberPermissions?.bitfield ?? 0n;
   if (!canConfigureGuild(permissions)) {
-    await interaction.reply(ephemeral("You need Manage Server to change server defaults."));
+    await interaction.reply(ephemeral("You need Manage Server to change the global settings."));
     return;
   }
 
@@ -430,8 +430,8 @@ async function handleDefault(
     const stored = getGuildDefaults(deps.db, guildId);
     await interaction.showModal(
       buildConfigModal({
-        customId: DEFAULT_MODAL_ID,
-        title: "Server defaults",
+        customId: SETTINGS_MODAL_ID,
+        title: "Marzano settings",
         initial: stored ?? null,
       }),
     );
@@ -448,7 +448,7 @@ async function handleDefault(
     });
 
     const config = result.config ?? BUILT_IN_DEFAULTS;
-    await interaction.reply(ephemeral(`Server defaults updated: ${describeConfig(config)}.`));
+    await interaction.reply(ephemeral(`Global settings updated: ${describeConfig(config)}.`));
   } catch (error) {
     if (error instanceof SplitError || error instanceof WizardError) {
       await interaction.reply(ephemeral(error.message));
@@ -730,7 +730,7 @@ async function handleConfigModalSubmit(
       const result = applyGuildDefaultsWizard(deps.db, guildId, input);
       await interaction.reply(
         ephemeral(
-          `Server defaults updated: ${describeConfig(result.config ?? BUILT_IN_DEFAULTS)}.`,
+          `Global settings updated: ${describeConfig(result.config ?? BUILT_IN_DEFAULTS)}.`,
         ),
       );
       return;
@@ -763,7 +763,7 @@ async function handleModalSubmit(interaction: Interaction, deps: HandlerDeps): P
     return;
   }
 
-  if (interaction.customId === DEFAULT_MODAL_ID) {
+  if (interaction.customId === SETTINGS_MODAL_ID) {
     await handleConfigModalSubmit(interaction, deps, "guild");
     return;
   }
@@ -851,8 +851,8 @@ export async function handleInteraction(
     return;
   }
 
-  if (command === DEFAULT_COMMAND.name) {
-    await handleDefault(interaction, deps);
+  if (command === SETTINGS_COMMAND.name) {
+    await handleSettings(interaction, deps);
     return;
   }
 

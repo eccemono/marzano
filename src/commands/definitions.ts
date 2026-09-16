@@ -171,9 +171,9 @@ export const CONFIGURE_COMMAND = {
   options: CONFIGURE_OPTIONS,
 } as const;
 
-export const DEFAULT_COMMAND = {
-  name: "default",
-  description: "Change the server defaults used by newly configured channels",
+export const SETTINGS_COMMAND = {
+  name: "settings",
+  description: "Open Marzano's global settings for this server",
   options: DEFAULT_OPTIONS,
 } as const;
 
@@ -228,7 +228,7 @@ export const APPLICATION_COMMANDS = [
   START_COMMAND,
   STATUS_COMMAND,
   CONFIGURE_COMMAND,
-  DEFAULT_COMMAND,
+  SETTINGS_COMMAND,
   STOP_COMMAND,
   LEADERBOARD_COMMAND,
   INFO_COMMAND,

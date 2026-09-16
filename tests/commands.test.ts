@@ -55,7 +55,7 @@ describe("command definitions", () => {
       "start",
       "status",
       "configure",
-      "default",
+      "settings",
       "stop",
       "leaderboard",
       "info",
@@ -118,7 +118,7 @@ describe("command definitions", () => {
   });
 
   it("offers reset but not copy_from on the guild defaults wizard", () => {
-    const names = command("default").options?.map((option) => option.name) ?? [];
+    const names = command("settings").options?.map((option) => option.name) ?? [];
 
     expect(names).not.toContain("copy_from");
     expect(names).not.toContain("reset");

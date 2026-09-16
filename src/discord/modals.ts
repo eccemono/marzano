@@ -48,7 +48,7 @@ export function buildSplitModal(options: SplitModalOptions): ModalBuilder {
 }
 
 export const CONFIGURE_MODAL_ID = "marzano:setup:configure";
-export const DEFAULT_MODAL_ID = "marzano:setup:default";
+export const SETTINGS_MODAL_ID = "marzano:setup:settings";
 
 /** The input ids shared by both config modals. */
 export const CONFIG_INPUT_IDS = {
