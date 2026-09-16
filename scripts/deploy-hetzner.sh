@@ -18,6 +18,14 @@ set -Eeuo pipefail
 GIT_BIN="${GIT_BIN:-git}"
 NPM_BIN="${NPM_BIN:-npm}"
 NODE_BIN="${NODE_BIN:-/usr/local/lib/nodejs/node-v22.23.2-linux-x64/bin/node}"
+
+# npm has to run under the pinned interpreter. Its shebang is
+# `#!/usr/bin/env node`, so pointing NPM_BIN at a path is not enough on its own:
+# `node` is resolved from PATH, and this host's system node is 24.x. Left alone,
+# `npm ci` builds native modules (better-sqlite3, @discordjs/opus) against Node
+# 24's ABI while the app runs on Node 22, and the process crash-loops on startup.
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+
 PM2_BIN="${PM2_BIN:-pm2}"
 SQLITE_BIN="${SQLITE_BIN:-sqlite3}"
 
@@ -124,7 +132,12 @@ previous_revision() {
 
 pull_main() {
   log "fetching origin/${BRANCH}"
-  "$GIT_BIN" -C "$APP_DIR" fetch --prune origin
+  # stdout is reserved for the revision this function returns. `git fetch` and
+  # `git merge` both write progress and summaries there, and `main` captures the
+  # whole of it with $(...). Left alone, the captured "revision" becomes a
+  # multi-line blob, the health check can never match it, and a healthy deploy
+  # gets rolled back.
+  "$GIT_BIN" -C "$APP_DIR" fetch --prune origin >&2
 
   local target
   target="$("$GIT_BIN" -C "$APP_DIR" rev-parse "origin/${BRANCH}")"
@@ -138,7 +151,7 @@ pull_main() {
 
   # Fast-forward only. A remote rewrite should stop the deploy, not silently
   # merge something nobody reviewed.
-  if ! "$GIT_BIN" -C "$APP_DIR" merge --ff-only "$target"; then
+  if ! "$GIT_BIN" -C "$APP_DIR" merge --ff-only "$target" >&2; then
     fail "cannot fast-forward to ${target}; ${APP_DIR} has diverged from origin/${BRANCH}."
     exit "$EXIT_GIT"
   fi

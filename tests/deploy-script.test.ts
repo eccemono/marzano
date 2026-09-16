@@ -62,6 +62,11 @@ case "$*" in
   *"status --porcelain"*) [ "\${GIT_DIRTY:-0}" = "1" ] && echo " M dirty" ;;
   *"merge --ff-only"*)
     if [ "\${GIT_MERGE_FAIL:-0}" = "1" ]; then exit 1; fi
+    # Real git prints the merge summary to stdout. Without it the stub is quieter
+    # than the tool it replaces, and a deploy that mangles the captured revision
+    # would still look green.
+    echo "Updating aaaaaaaa..\${GIT_TARGET:-bbbbbbbbbbbb}"
+    echo "Fast-forward"
     echo "\${GIT_TARGET:-bbbbbbbbbbbb}" > "$STATE" ;;
   *"rev-parse origin/"*) echo "\${GIT_TARGET:-bbbbbbbbbbbb}" ;;
   *"rev-parse HEAD"*)
@@ -228,6 +233,21 @@ describe("successful deploy", () => {
 
     const backups = readFileSync(sandbox.callsFile, "utf8");
     expect(backups).toContain(".backup");
+  });
+
+  it("keeps the captured revision clean when git prints a merge summary", () => {
+    // `git merge --ff-only` writes "Updating ... / Fast-forward / <diffstat>" to
+    // stdout, and main() captures pull_main with $(...). Left unredirected, that
+    // noise becomes the revision, the health comparison can never match it, and
+    // a healthy deploy gets rolled back - which is exactly what happened in
+    // production.
+    const sandbox = createSandbox();
+    const result = runDeploy(sandbox);
+
+    expect(result.code).toBe(0);
+    // A polluted revision fails the health comparison, and the visible symptom
+    // is a rollback: `reset --hard` back to the previous revision.
+    expect(callsOf(sandbox).some((call) => call.includes("reset --hard"))).toBe(false);
   });
 });
 
