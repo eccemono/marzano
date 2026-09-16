@@ -16,6 +16,7 @@ import { BOT_NAME, REPOSITORY_URL, VERSION, assertSupportedNode } from "./runtim
 import { createDiscordAudience } from "./session/audience";
 import { SessionSupervisor } from "./session/supervisor";
 import { createDiscordVoiceGateway } from "./voice/gateway";
+import { VoiceStatus, createDiscordVoiceStatus } from "./voice/channel-status";
 import { SessionVoice } from "./voice/manager";
 import { createSoundLibrary } from "./voice/sounds";
 
@@ -70,6 +71,15 @@ async function main(): Promise<void> {
       logger: logger.child({ component: "voice" }),
     });
 
+    // Optional: mirrors the stage into the voice channel's own status line.
+    // Off unless VOICE_STATUS_ENABLED is set, because it needs a permission the
+    // least-privilege invite does not grant.
+    const voiceStatus = new VoiceStatus({
+      gateway: createDiscordVoiceStatus(client, logger.child({ component: "voice-status" })),
+      logger: logger.child({ component: "voice-status" }),
+      enabled: config.voiceStatusEnabled,
+    });
+
     // One presenter per guild. The supervisor starts and stops each guild's
     // refresh loop as sessions begin and end, so a session started at any time
     // keeps its countdown live.
@@ -77,6 +87,11 @@ async function main(): Promise<void> {
       db,
       gateway: createMessageGateway(client),
       logger: logger.child({ component: "session" }),
+      // The status update rides the refresh cadence instead of its own timer,
+      // and writes only when its text has changed.
+      onRendered: (session) => {
+        void voiceStatus.sync(session, Date.now());
+      },
     });
 
     const supervisor = new SessionSupervisor({
@@ -86,6 +101,7 @@ async function main(): Promise<void> {
       audience: createDiscordAudience(client),
       logger: logger.child({ component: "lifecycle" }),
       graceMs: config.graceMs,
+      voiceStatus,
     });
 
     // The deploy script polls this file to decide whether a deploy succeeded,

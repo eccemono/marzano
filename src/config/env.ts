@@ -29,6 +29,13 @@ export interface AppConfig {
   graceMs: number;
   /** When set, slash commands register in this guild only (instant updates). */
   devGuildId: string | null;
+  /**
+   * Whether to mirror the stage into the voice channel's own status line.
+   *
+   * Off by default: it needs the Set Voice Channel Status permission, which the
+   * bot's least-privilege invite does not grant.
+   */
+  voiceStatusEnabled: boolean;
 }
 
 /** Discord snowflakes are 17-20 digit decimal strings. */
@@ -97,6 +104,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new ConfigError("DEV_GUILD_ID must be a Discord snowflake when set.");
   }
 
+  // Strict on purpose: a typo like VOICE_STATUS_ENABLED=ture silently reading
+  // as "off" is the kind of thing that costs an hour of confused debugging.
+  const voiceStatusRaw = (env.VOICE_STATUS_ENABLED ?? "").trim().toLowerCase();
+  if (
+    voiceStatusRaw.length > 0 &&
+    !["true", "false", "1", "0", "yes", "no"].includes(voiceStatusRaw)
+  ) {
+    throw new ConfigError('VOICE_STATUS_ENABLED must be a boolean ("true" or "false") when set.');
+  }
+  const voiceStatusEnabled = ["true", "1", "yes"].includes(voiceStatusRaw);
+
   return {
     discordToken,
     clientId,
@@ -107,5 +125,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     shutdownTimeoutMs,
     graceMs,
     devGuildId: devGuildId.length > 0 ? devGuildId : null,
+    voiceStatusEnabled,
   };
 }

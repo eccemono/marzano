@@ -40,6 +40,14 @@ export interface SessionRendererOptions {
   now?: () => number;
   baseIntervalMs?: number;
   maxIntervalMs?: number;
+  /**
+   * Called after each render, including the periodic ticks.
+   *
+   * The voice-channel status piggybacks on the existing refresh cadence rather
+   * than running a timer of its own; it writes only when its text has actually
+   * changed, so most ticks cost nothing.
+   */
+  onRendered?: (session: TimerSession) => void;
 }
 
 export class SessionRenderer implements SessionRendererPort {
@@ -49,6 +57,7 @@ export class SessionRenderer implements SessionRendererPort {
   private readonly now: (() => number) | undefined;
   private readonly baseIntervalMs: number | undefined;
   private readonly maxIntervalMs: number | undefined;
+  private readonly onRendered: ((session: TimerSession) => void) | undefined;
 
   private readonly presenters = new Map<string, SessionPresenter>();
   private readonly watching = new Set<string>();
@@ -60,6 +69,7 @@ export class SessionRenderer implements SessionRendererPort {
     this.now = options.now;
     this.baseIntervalMs = options.baseIntervalMs;
     this.maxIntervalMs = options.maxIntervalMs;
+    this.onRendered = options.onRendered;
   }
 
   private for(guildId: string): SessionPresenter {
@@ -91,8 +101,15 @@ export class SessionRenderer implements SessionRendererPort {
       (rendered, result) => {
         // The message was replaced after being deleted; remember the new id or
         // every later refresh would try the dead one again.
-        if (result.messageId === rendered.statusMessageId) return;
-        saveActiveSession(this.db, { ...rendered, statusMessageId: result.messageId });
+        if (result.messageId !== rendered.statusMessageId) {
+          saveActiveSession(this.db, { ...rendered, statusMessageId: result.messageId });
+        }
+
+        try {
+          this.onRendered?.(rendered);
+        } catch {
+          // An observer must never break the refresh loop.
+        }
       },
     );
 

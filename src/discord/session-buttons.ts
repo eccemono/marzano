@@ -59,51 +59,54 @@ function resolveAction(action: SessionAction, session: TimerSession): SessionAct
   return action;
 }
 
+/**
+ * Apply a button action to the session.
+ *
+ * `notice` is null for every action that shows its result in the status message
+ * itself. The old behaviour posted an ephemeral "Paused." next to an embed that
+ * already said paused, which is a second, more private, less clear copy of the
+ * same fact. `notice` is only set when there is genuinely something the status
+ * message cannot convey.
+ */
 function applyAction(
   action: SessionAction,
   session: TimerSession,
   customId: string,
   now: number,
-): { session: TimerSession; note: string; remove: boolean } {
+): { session: TimerSession; notice: string | null; remove: boolean } {
   switch (action) {
     case "pause":
-      return { session: pause(session, now), note: "Paused.", remove: false };
+      return { session: pause(session, now), notice: null, remove: false };
     case "resume":
-      return { session: resume(session, now), note: "Resumed.", remove: false };
-    case "skip": {
-      const result = skip(session, now);
-      return { session: result.session, note: "Skipped to the next stage.", remove: false };
-    }
+      return { session: resume(session, now), notice: null, remove: false };
+    case "skip":
+      return { session: skip(session, now).session, notice: null, remove: false };
     case "stop":
       return {
         session: terminate(session, `stopped by a participant`),
-        note: "Session stopped.",
+        notice: null,
         remove: true,
       };
     case "extend": {
       const delta = EXTEND_BUTTON_MS[customId];
       if (delta === undefined) {
-        return { session, note: "That button is not recognised.", remove: false };
+        return { session, notice: "That button is not recognised.", remove: false };
       }
-      return {
-        session: extend(session, delta, now),
-        note: `Added ${delta / 60_000} minutes.`,
-        remove: false,
-      };
+      return { session: extend(session, delta, now), notice: null, remove: false };
     }
     case "toggle_sound": {
       const enabled = !session.config.soundEnabled;
       return {
         session: changeSessionSettings(session, { soundEnabled: enabled }),
-        note: `Sound ${enabled ? "on" : "off"}.`,
+        notice: null,
         remove: false,
       };
     }
     case "modify":
-      return { session, note: "", remove: false };
+      return { session, notice: null, remove: false };
     case "change_split":
       // Handled by the caller, which opens a modal rather than mutating here.
-      return { session, note: "", remove: false };
+      return { session, notice: null, remove: false };
   }
 }
 
@@ -180,6 +183,12 @@ export async function handleSessionButton(
   const now = Date.now();
   const applied = applyAction(resolved, stored, interaction.customId, now);
 
+  // Only for something the status message cannot show for us.
+  if (applied.notice) {
+    await interaction.reply(ephemeral(applied.notice));
+    return;
+  }
+
   if (applied.remove) {
     // The supervisor owns stopping: it records the reason, cancels timers,
     // leaves the voice channel and frees the guild for a new session.
@@ -203,9 +212,16 @@ export async function handleSessionButton(
     }
   }
 
-  // The status message is the visible acknowledgement, so keep the reply
-  // ephemeral and short to avoid two competing views of the same state.
-  await interaction.reply(ephemeral(applied.note));
+  // Acknowledge silently. The status message is the visible result, so there is
+  // nothing to add - and a confirmed action clears its own "are you sure?"
+  // prompt instead of leaving it behind or replacing it with a second notice.
+  await interaction.deferUpdate();
+
+  if (confirmation) {
+    await interaction.deleteReply().catch(() => {
+      // The prompt is already gone; nothing to clean up.
+    });
+  }
 }
 
 export { SESSION_BUTTON_IDS };

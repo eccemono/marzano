@@ -4,9 +4,11 @@ import { BUILT_IN_DEFAULTS } from "../src/domain/config";
 import { type TimerSession, pause, startSession, terminate } from "../src/domain/timer";
 import {
   buildSessionEmbed,
+  channelStatusText,
   cyclePosition,
   formatDuration,
   progressBar,
+  relativeTimestamp,
 } from "../src/discord/session-view";
 
 const T0 = 1_760_000_000_000;
@@ -45,30 +47,108 @@ describe("formatDuration", () => {
 describe("progressBar", () => {
   it("is empty at the start and full at the end", () => {
     expect(progressBar(0, 100, 10)).toBe("[----------]");
-    expect(progressBar(100, 100, 10)).toBe("[##########]");
+    expect(progressBar(100, 100, 10)).toBe("[oooooooooo]");
   });
 
-  it("fills proportionally", () => {
-    expect(progressBar(50, 100, 10)).toBe("[#####-----]");
+  it("fills with o rather than #", () => {
+    expect(progressBar(50, 100, 10)).toBe("[ooooo-----]");
   });
 
   it("clamps out-of-range input and tolerates a zero duration", () => {
-    expect(progressBar(500, 100, 10)).toBe("[##########]");
+    expect(progressBar(500, 100, 10)).toBe("[oooooooooo]");
     expect(progressBar(-5, 100, 10)).toBe("[----------]");
     expect(progressBar(10, 0, 10)).toBe("[----------]");
   });
 });
 
 describe("cyclePosition", () => {
-  it("counts completed focus stages within the cycle", () => {
-    expect(cyclePosition(newSession())).toBe("0 of 4");
-    expect(cyclePosition({ ...newSession(), completedFocusStages: 2 })).toBe("2 of 4");
+  it("counts the first focus period as 1 of the first window", () => {
+    expect(cyclePosition(newSession())).toBe("1/4");
   });
 
-  it("reports the completed cycle during a long break", () => {
+  it("counts up within the first window", () => {
+    expect(cyclePosition({ ...newSession(), completedFocusStages: 2 })).toBe("3/4");
+  });
+
+  it("expands the window instead of resetting after a long break", () => {
+    // The whole point: a long session keeps counting rather than starting over,
+    // so 1-4, then 5-8, then 9-12.
+    expect(cyclePosition({ ...newSession(), completedFocusStages: 4 })).toBe("5/8");
+    expect(cyclePosition({ ...newSession(), completedFocusStages: 8 })).toBe("9/12");
+    expect(cyclePosition({ ...newSession(), completedFocusStages: 12 })).toBe("13/16");
+  });
+
+  it("keeps every position inside the window it belongs to", () => {
+    const positions = Array.from({ length: 12 }, (_, index) =>
+      cyclePosition({ ...newSession(), completedFocusStages: index }),
+    );
+
+    expect(positions).toEqual([
+      "1/4",
+      "2/4",
+      "3/4",
+      "4/4",
+      "5/8",
+      "6/8",
+      "7/8",
+      "8/8",
+      "9/12",
+      "10/12",
+      "11/12",
+      "12/12",
+    ]);
+  });
+
+  it("credits the break to the focus period it follows", () => {
     const session = { ...newSession(), stage: "long_break" as const, completedFocusStages: 4 };
 
-    expect(cyclePosition(session)).toBe("4 of 4");
+    expect(cyclePosition(session)).toBe("4/4");
+  });
+
+  it("follows a configured window size other than four", () => {
+    // Clone the config: a session's config aliases BUILT_IN_DEFAULTS, so
+    // assigning through it would mutate the shared constant for every other
+    // test in this file.
+    const session = { ...newSession(), config: { ...BUILT_IN_DEFAULTS, cyclesBeforeLongBreak: 2 } };
+
+    expect(cyclePosition(session)).toBe("1/2");
+    expect(cyclePosition({ ...session, completedFocusStages: 2 })).toBe("3/4");
+  });
+});
+
+describe("relativeTimestamp", () => {
+  it("renders a Discord relative timestamp in whole seconds", () => {
+    // Discord renders this in each client and keeps it current itself, which is
+    // what makes the countdown smooth without us editing every few seconds.
+    expect(relativeTimestamp(1_760_000_000_000)).toBe("<t:1760000000:R>");
+  });
+
+  it("rounds down, so the countdown never shows a second that has not passed", () => {
+    expect(relativeTimestamp(1_760_000_000_999)).toBe("<t:1760000000:R>");
+  });
+});
+
+describe("channelStatusText", () => {
+  it("names the stage and the minutes left", () => {
+    const session = newSession();
+
+    expect(channelStatusText(session, T0 + 13 * MINUTE)).toBe("Focus - 12m left");
+  });
+
+  it("says paused instead of a countdown when paused", () => {
+    const paused = pause(newSession(), T0 + 10 * MINUTE);
+
+    expect(channelStatusText(paused, T0 + 99 * MINUTE)).toBe("Focus - paused");
+  });
+
+  it("never rounds a live stage down to zero minutes", () => {
+    const session = newSession();
+
+    expect(channelStatusText(session, T0 + 25 * MINUTE - 1_000)).toBe("Focus - 1m left");
+  });
+
+  it("has nothing to say once the session has stopped", () => {
+    expect(channelStatusText(terminate(newSession(), "everyone left"), T0)).toBeNull();
   });
 });
 
@@ -90,10 +170,16 @@ describe("buildSessionEmbed", () => {
     expect(longBreak.title).toContain("Long break");
   });
 
-  it("shows remaining time derived from the deadline", () => {
+  it("shows a client-rendered countdown to the stage deadline", () => {
     const embed = buildSessionEmbed({ session: newSession(), now: T0 + 10 * MINUTE });
 
-    expect(embed.description).toContain("15m 00s remaining");
+    expect(embed.description).toContain("<t:1760001500:R>");
+  });
+
+  it("does not carry the old auto-refresh footer", () => {
+    const embed = buildSessionEmbed({ session: newSession(), now: T0 });
+
+    expect(embed).not.toHaveProperty("footer");
   });
 
   it("marks a paused session and shows its held remainder", () => {
@@ -103,21 +189,22 @@ describe("buildSessionEmbed", () => {
     expect(embed.title).toContain("(paused)");
     expect(embed.description).toContain("Paused");
     expect(embed.description).toContain("15m 00s left");
-    expect(embed.footer.text).toMatch(/Paused/i);
+    // A paused session has no deadline, so it must not show a relative
+    // timestamp - that would keep ticking and claim time is passing.
+    expect(embed.description).not.toContain("<t:");
   });
 
   it("reports the split, cycle, sound state and voice channel", () => {
     const session = newSession();
 
     expect(fieldValue(session, T0, "Split")).toBe("25/5/15");
-    expect(fieldValue(session, T0, "Cycle")).toBe("0 of 4");
+    expect(fieldValue(session, T0, "Cycle")).toBe("1/4");
     expect(fieldValue(session, T0, "Sound")).toBe("on (80%)");
     expect(fieldValue(session, T0, "Voice channel")).toBe("<#222222222222222222>");
   });
 
   it("reflects sound being turned off", () => {
-    const session = newSession();
-    session.config.soundEnabled = false;
+    const session = { ...newSession(), config: { ...BUILT_IN_DEFAULTS, soundEnabled: false } };
 
     expect(fieldValue(session, T0, "Sound")).toBe("off");
   });
@@ -126,7 +213,7 @@ describe("buildSessionEmbed", () => {
     const stopped = terminate(newSession(), "everyone left");
 
     expect(buildSessionEmbed({ session: stopped, now: T0 + 999 * MINUTE }).description).toContain(
-      "0m 00s remaining",
+      "0m 00s left",
     );
   });
 

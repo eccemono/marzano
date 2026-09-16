@@ -35,6 +35,11 @@ export const DEFAULT_GRACE_MS = 60_000;
 /** Bound on graceful shutdown, so a stuck connection cannot block a kill. */
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 
+/** The optional voice-channel status, cleared when a session ends. */
+export interface VoiceStatusPort {
+  clear(session: TimerSession): Promise<void>;
+}
+
 export interface SupervisorOptions {
   db: Db;
   voice: SessionVoice;
@@ -44,6 +49,7 @@ export interface SupervisorOptions {
   now?: () => number;
   schedule?: ScheduleFn;
   graceMs?: number;
+  voiceStatus?: VoiceStatusPort;
 }
 
 export interface WakeOutcome {
@@ -83,6 +89,7 @@ export class SessionSupervisor {
   private readonly now: () => number;
   private readonly schedule: ScheduleFn;
   private readonly graceMs: number;
+  private readonly voiceStatus: VoiceStatusPort | undefined;
 
   private readonly stageTimers = new Map<string, TimerHandle>();
   private readonly graceTimers = new Map<string, TimerHandle>();
@@ -97,6 +104,7 @@ export class SessionSupervisor {
     this.now = options.now ?? (() => Date.now());
     this.schedule = options.schedule ?? systemSchedule;
     this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
+    this.voiceStatus = options.voiceStatus;
   }
 
   /** Whether a stage wake is currently scheduled for a guild. */
@@ -375,6 +383,18 @@ export class SessionSupervisor {
 
     // Show the terminal state, then drop the row so the guild can start again.
     await this.presenter.render(stopped);
+
+    // The status line belongs to the live session, so it goes when the session
+    // does rather than being left to age on the channel.
+    if (this.voiceStatus) {
+      await this.voiceStatus.clear(stopped).catch((error: unknown) => {
+        this.logger.warn("could not clear the voice channel status", {
+          guildId,
+          reason: describe(error),
+        });
+      });
+    }
+
     deleteActiveSession(this.db, guildId);
 
     this.logger.info("session stopped", { guildId, reason });
