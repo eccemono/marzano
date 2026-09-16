@@ -17,6 +17,18 @@ const SPLIT_OPTION = {
   required: false,
 } as const;
 
+const PERIOD_OPTION = {
+  type: ApplicationCommandOptionType.String,
+  name: "period",
+  description: "Which period to show",
+  required: false,
+  choices: [
+    { name: "This month", value: "monthly" },
+    { name: "This year", value: "yearly" },
+    { name: "All time", value: "all-time" },
+  ],
+} as const;
+
 const CONFIGURE_OPTIONS = [
   {
     type: ApplicationCommandOptionType.String,
@@ -124,6 +136,12 @@ export const POMODORO_COMMAND = {
       name: "stop",
       description: "Stop the session in this voice channel",
     },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: "leaderboard",
+      description: "Show the most Pomodoro time in this server",
+      options: [PERIOD_OPTION],
+    },
   ],
 } as const;
 
@@ -132,7 +150,17 @@ export const INFO_COMMAND = {
   description: "Show Marzano's version, uptime and source repository",
 } as const;
 
+export const PERIODS = ["monthly", "yearly", "all-time"] as const;
+export type LeaderboardPeriodChoice = (typeof PERIODS)[number];
+
 export const APPLICATION_COMMANDS = [POMODORO_COMMAND, INFO_COMMAND] as const;
 
-export const POMODORO_SUBCOMMANDS = ["start", "status", "configure", "default", "stop"] as const;
+export const POMODORO_SUBCOMMANDS = [
+  "start",
+  "status",
+  "configure",
+  "default",
+  "stop",
+  "leaderboard",
+] as const;
 export type PomodoroSubcommand = (typeof POMODORO_SUBCOMMANDS)[number];

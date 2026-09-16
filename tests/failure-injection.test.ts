@@ -60,6 +60,7 @@ function presenterWithGateway(behaviour: { edit: "missing" | "ok"; postId: strin
   // render path, not the refresh loop, so the loop hooks stay inert.
   const presenter: SessionRendererPort = {
     render: (session) => inner.render(session),
+    renderWithEmbed: (session, embed) => inner.renderWithEmbed(session, embed),
     watch: () => {},
     unwatch: () => {},
     unwatchAll: () => {},
@@ -224,6 +225,9 @@ function fakeVoice(): FakeVoice {
 function fakePresenter(): SessionRendererPort {
   return {
     async render(session: { statusMessageId: string | null }) {
+      return { messageId: session.statusMessageId ?? "message-1", replaced: false };
+    },
+    async renderWithEmbed(session: { statusMessageId: string | null }) {
       return { messageId: session.statusMessageId ?? "message-1", replaced: false };
     },
     watch() {},

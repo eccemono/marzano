@@ -15,6 +15,7 @@ import { createLogger } from "./logger";
 import { BOT_NAME, REPOSITORY_URL, VERSION, assertSupportedNode } from "./runtime";
 import { createDiscordAudience } from "./session/audience";
 import { SessionSupervisor } from "./session/supervisor";
+import { SessionHistory } from "./session/history";
 import { createDiscordVoiceGateway } from "./voice/gateway";
 import { VoiceStatus, createDiscordVoiceStatus } from "./voice/channel-status";
 import { SessionVoice } from "./voice/manager";
@@ -102,6 +103,10 @@ async function main(): Promise<void> {
       logger: logger.child({ component: "lifecycle" }),
       graceMs: config.graceMs,
       voiceStatus,
+      history: new SessionHistory({
+        db,
+        logger: logger.child({ component: "history" }),
+      }),
     });
 
     // The deploy script polls this file to decide whether a deploy succeeded,

@@ -67,12 +67,92 @@ CREATE TABLE active_sessions (
 CREATE INDEX idx_active_sessions_updated ON active_sessions (updated_at);
 `;
 
+const SCHEMA_V2 = `
+-- One row per session, from start to stop. Everything else hangs off this, so
+-- history is a record of what actually happened rather than something
+-- reconstructed from whatever the live tables happen to hold.
+CREATE TABLE session_runs (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id          TEXT NOT NULL,
+  voice_channel_id  TEXT NOT NULL,
+  started_at        INTEGER NOT NULL,
+  ended_at          INTEGER,
+  stop_reason       TEXT,
+  created_at        TEXT NOT NULL
+);
+
+CREATE INDEX idx_session_runs_guild ON session_runs (guild_id, started_at);
+
+-- Each stage that ran, and how it ended. A skipped focus stage is recorded but
+-- earns no focus credit, which is what keeps the summary honest.
+CREATE TABLE stage_outcomes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id      INTEGER NOT NULL REFERENCES session_runs (id) ON DELETE CASCADE,
+  guild_id    TEXT NOT NULL,
+  stage       TEXT NOT NULL,
+  started_at  INTEGER NOT NULL,
+  ended_at    INTEGER NOT NULL,
+  outcome     TEXT NOT NULL,
+  CHECK (outcome IN ('completed', 'skipped', 'interrupted'))
+);
+
+CREATE INDEX idx_stage_outcomes_run ON stage_outcomes (run_id);
+CREATE INDEX idx_stage_outcomes_guild ON stage_outcomes (guild_id, ended_at);
+
+-- Presence windows. An open window has left_at NULL so a crash is recoverable:
+-- the row is still there to be closed on the next boot.
+CREATE TABLE attendance (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     INTEGER NOT NULL REFERENCES session_runs (id) ON DELETE CASCADE,
+  guild_id   TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  joined_at  INTEGER NOT NULL,
+  left_at    INTEGER
+);
+
+CREATE INDEX idx_attendance_run ON attendance (run_id);
+CREATE INDEX idx_attendance_open ON attendance (run_id, left_at);
+
+-- Credit already resolved against a stage. Focus and break are separate rows
+-- (and separate kinds) so the leaderboard can sum them while the summary can
+-- still show them apart.
+CREATE TABLE credit_segments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id      INTEGER NOT NULL REFERENCES session_runs (id) ON DELETE CASCADE,
+  guild_id    TEXT NOT NULL,
+  user_id     TEXT NOT NULL,
+  stage       TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  started_at  INTEGER NOT NULL,
+  ended_at    INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  CHECK (kind IN ('focus', 'break'))
+);
+
+CREATE INDEX idx_credit_ranking ON credit_segments (guild_id, ended_at, user_id);
+CREATE INDEX idx_credit_run ON credit_segments (run_id);
+
+-- The live session's run, so a restart continues the same run instead of
+-- opening a second one for the same session.
+CREATE TABLE active_run (
+  guild_id  TEXT PRIMARY KEY,
+  run_id    INTEGER NOT NULL
+);
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "core schema: guild defaults, channel configs, active sessions",
     up(db) {
       db.exec(SCHEMA_V1);
+    },
+  },
+  {
+    version: 2,
+    name: "history: session runs, stage outcomes, attendance and credit segments",
+    up(db) {
+      db.exec(SCHEMA_V2);
     },
   },
 ];

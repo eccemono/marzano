@@ -69,8 +69,8 @@ describe("migrations", () => {
     const result = migrate(db);
 
     expect(result.from).toBe(0);
-    expect(result.to).toBe(1);
-    expect(result.applied).toEqual([1]);
+    expect(result.to).toBe(2);
+    expect(result.applied).toEqual([1, 2]);
 
     db.close();
   });
@@ -81,8 +81,8 @@ describe("migrations", () => {
     const second = migrate(db);
 
     expect(second.applied).toEqual([]);
-    expect(second.from).toBe(1);
-    expect(second.to).toBe(1);
+    expect(second.from).toBe(2);
+    expect(second.to).toBe(2);
 
     db.close();
   });
@@ -98,6 +98,13 @@ describe("migrations", () => {
       expect(names).toContain("channel_configs");
       expect(names).toContain("active_sessions");
       expect(names).toContain("schema_migrations");
+
+      // v2: durable history.
+      expect(names).toContain("session_runs");
+      expect(names).toContain("stage_outcomes");
+      expect(names).toContain("attendance");
+      expect(names).toContain("credit_segments");
+      expect(names).toContain("active_run");
     });
   });
 });
@@ -272,14 +279,14 @@ describe("durability", () => {
 
     try {
       const first = openMigratedDatabase(directory);
-      expect(first.migration.to).toBe(1);
+      expect(first.migration.to).toBe(2);
       saveChannelConfig(first.db, GUILD, CHANNEL_A, { focusMinutes: 42 });
       saveActiveSession(first.db, sessionRecord({ completedFocusStages: 3 }));
       first.db.close();
 
       const second = openMigratedDatabase(directory);
 
-      expect(currentVersion(second.db)).toBe(1);
+      expect(currentVersion(second.db)).toBe(2);
       expect(getChannelConfig(second.db, GUILD, CHANNEL_A)?.config.focusMinutes).toBe(42);
       expect(getActiveSession(second.db, GUILD)?.completedFocusStages).toBe(3);
 
@@ -296,7 +303,7 @@ describe("durability", () => {
       const nested = join(directory, "deeply", "nested");
       const { db } = openMigratedDatabase(nested);
 
-      expect(currentVersion(db)).toBe(1);
+      expect(currentVersion(db)).toBe(2);
       db.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

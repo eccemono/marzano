@@ -8,6 +8,7 @@ import {
   type SessionMessageGateway,
   SessionPresenter,
 } from "./session-presenter";
+import type { SessionEmbed } from "./session-view";
 
 /**
  * Rendering ownership.
@@ -25,6 +26,8 @@ import {
 export interface SessionRendererPort {
   /** Post or refresh the status message for a session. */
   render(session: TimerSession): Promise<RenderResult>;
+  /** Replace the status message with a final embed, such as the summary. */
+  renderWithEmbed(session: TimerSession, embed: SessionEmbed): Promise<RenderResult>;
   /** Begin refreshing a guild's status message. Idempotent. */
   watch(guildId: string): void;
   /** Stop refreshing a guild's status message. Idempotent. */
@@ -90,6 +93,10 @@ export class SessionRenderer implements SessionRendererPort {
 
   render(session: TimerSession): Promise<RenderResult> {
     return this.for(session.guildId).render(session);
+  }
+
+  renderWithEmbed(session: TimerSession, embed: SessionEmbed): Promise<RenderResult> {
+    return this.for(session.guildId).renderWithEmbed(session, embed);
   }
 
   watch(guildId: string): void {

@@ -25,6 +25,8 @@ import {
 } from "../db/session-repository";
 import { advance, isPaused, isStopped, terminate, type TimerSession } from "../domain/timer";
 import type { SessionRendererPort } from "../discord/session-renderer";
+import { buildSummaryEmbed } from "../discord/history-views";
+import type { SessionHistory } from "./history";
 import type { SessionVoice } from "../voice/manager";
 
 import { type ScheduleFn, type TimerHandle, type VoiceAudience, systemSchedule } from "./ports";
@@ -50,6 +52,8 @@ export interface SupervisorOptions {
   schedule?: ScheduleFn;
   graceMs?: number;
   voiceStatus?: VoiceStatusPort;
+  /** Durable history. Optional so the lifecycle rules can be tested alone. */
+  history?: SessionHistory;
 }
 
 export interface WakeOutcome {
@@ -90,6 +94,7 @@ export class SessionSupervisor {
   private readonly schedule: ScheduleFn;
   private readonly graceMs: number;
   private readonly voiceStatus: VoiceStatusPort | undefined;
+  private readonly history: SessionHistory | undefined;
 
   private readonly stageTimers = new Map<string, TimerHandle>();
   private readonly graceTimers = new Map<string, TimerHandle>();
@@ -105,6 +110,7 @@ export class SessionSupervisor {
     this.schedule = options.schedule ?? systemSchedule;
     this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
     this.voiceStatus = options.voiceStatus;
+    this.history = options.history;
   }
 
   /** Whether a stage wake is currently scheduled for a guild. */
@@ -128,6 +134,10 @@ export class SessionSupervisor {
     // only for the sessions that existed at boot is why a session started
     // afterwards had no loop at all and its countdown sat frozen on screen.
     this.presenter.watch(session.guildId);
+
+    // Open the history run at the same moment the session starts, so no stage
+    // can ever end before there is somewhere to record it.
+    this.history?.begin(session.guildId, session.voiceChannelId, this.now());
 
     this.scheduleStageWake(session);
     // Fire and forget: the cue must never delay the interaction that started
@@ -188,6 +198,23 @@ export class SessionSupervisor {
 
     // Persist BEFORE scheduling. See the ordering note at the top of this file.
     saveActiveSession(this.db, advanced);
+
+    // Record every stage that just ended, with the window it actually occupied.
+    // A wake after a restart can cross several boundaries at once, so the start
+    // of each window is the previous boundary rather than "now".
+    if (this.history && transitions.length > 0) {
+      let cursor = session.stageStartedAt ?? transitions[0]?.at ?? this.now();
+
+      for (const transition of transitions) {
+        this.history.endStage(guildId, {
+          stage: transition.from,
+          startedAt: cursor,
+          endedAt: transition.at,
+          outcome: "completed",
+        });
+        cursor = transition.at;
+      }
+    }
 
     let bellsPlayed = 0;
     let bellsSkipped = 0;
@@ -303,6 +330,10 @@ export class SessionSupervisor {
 
     const humans = await this.audience.humanMembers(guildId, session.voiceChannelId);
 
+    // Presence is recorded whatever the outcome, including "nobody here":
+    // whether that ends the session is decided below, not by the bookkeeping.
+    if (humans !== null) this.history?.syncMembers(guildId, humans, this.now());
+
     if (humans === null) {
       // Inconclusive. Never end a session on a failed lookup.
       this.logger.warn(
@@ -347,6 +378,10 @@ export class SessionSupervisor {
     // the channel may have refilled, and a stale timer must not end a live session.
     const humans = await this.audience.humanMembers(guildId, session.voiceChannelId);
 
+    // Presence is recorded whatever the outcome, including "nobody here":
+    // whether that ends the session is decided below, not by the bookkeeping.
+    if (humans !== null) this.history?.syncMembers(guildId, humans, this.now());
+
     if (humans === null) {
       this.logger.warn("grace expired but presence could not be confirmed; session left running", {
         guildId,
@@ -381,8 +416,26 @@ export class SessionSupervisor {
 
     await this.voice.leave(guildId);
 
-    // Show the terminal state, then drop the row so the guild can start again.
-    await this.presenter.render(stopped);
+    // Close the run and turn its history into the terminal view. The summary
+    // replaces the live message rather than following it, so the channel keeps
+    // one clear record of what happened instead of a dead timer sitting above a
+    // summary of the same session.
+    const report = this.history?.finish(guildId, reason, this.now()) ?? null;
+
+    if (report) {
+      await this.presenter.renderWithEmbed(
+        stopped,
+        buildSummaryEmbed({
+          reason,
+          startedAt: report.startedAt,
+          endedAt: report.endedAt,
+          outcomes: report.outcomes,
+          totals: report.totals,
+        }),
+      );
+    } else {
+      await this.presenter.render(stopped);
+    }
 
     // The status line belongs to the live session, so it goes when the session
     // does rather than being left to age on the channel.
@@ -439,8 +492,36 @@ export class SessionSupervisor {
     ]);
   }
 
-  /** Rejoin, re-present, and reschedule a session that is still alive. */
+  /**
+   * Record the current stage as skipped and move nothing.
+   *
+   * The caller moves the session; this exists so a skip leaves the same kind of
+   * history trail a natural boundary does, without earning credit the member
+   * did not do the work for.
+   */
+  noteSkipped(guildId: string): void {
+    if (!this.history) return;
+
+    const session = getActiveSession(this.db, guildId);
+    if (!session || isStopped(session)) return;
+
+    const at = this.now();
+    this.history.endStage(guildId, {
+      stage: session.stage,
+      startedAt: session.stageStartedAt ?? at,
+      endedAt: at,
+      outcome: "skipped",
+    });
+  }
+
+  /**
+   * Rejoin, re-present, and reschedule a session that is still alive.
+   */
   private async restore(guildId: string, session: ActiveSessionRecord): Promise<void> {
+    // Adopt the run the restart interrupted, so a session spanning a deploy
+    // counts once rather than twice.
+    this.history?.adopt(guildId, session.voiceChannelId, this.now());
+
     await this.voice.join(session);
 
     this.presenter.watch(guildId);

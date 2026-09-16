@@ -112,6 +112,11 @@ export class FakePresenter {
     return { messageId: session.statusMessageId ?? this.nextMessageId, replaced: false };
   }
 
+  async renderWithEmbed(session: TimerSession) {
+    this.renders.push(session);
+    return { messageId: session.statusMessageId ?? this.nextMessageId, replaced: false };
+  }
+
   watch(guildId: string): void {
     this.watching.add(guildId);
   }
