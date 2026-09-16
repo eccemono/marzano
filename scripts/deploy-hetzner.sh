@@ -147,18 +147,27 @@ pull_main() {
 }
 
 install_dependencies() {
-  if ! (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --no-audit --no-fund); then
+  # The build needs devDependencies - TypeScript above all - so install the full
+  # tree, build, and prune afterwards. Installing with --omit=dev here would
+  # make `npm run build` fail with "tsc: not found" on every single deploy.
+  if ! (cd "$APP_DIR" && "$NPM_BIN" ci --no-audit --no-fund); then
     fail "dependency install failed."
     exit "$EXIT_INSTALL"
   fi
 }
 
 build() {
-  # Build needs devDependencies, which this install deliberately omits, so the
-  # build runs in the checkout and only the runtime deps are needed to run it.
   if ! (cd "$APP_DIR" && "$NPM_BIN" run build); then
     fail "build failed."
     exit "$EXIT_BUILD"
+  fi
+}
+
+prune_dependencies() {
+  # Leave only what the running process needs on the host.
+  if ! (cd "$APP_DIR" && "$NPM_BIN" prune --omit=dev --no-audit --no-fund); then
+    fail "could not prune development dependencies."
+    exit "$EXIT_INSTALL"
   fi
 }
 
@@ -211,13 +220,18 @@ rollback() {
   fail "rolling back to ${target}"
   "$GIT_BIN" -C "$APP_DIR" reset --hard "$target"
 
-  if ! (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --no-audit --no-fund); then
+  if ! (cd "$APP_DIR" && "$NPM_BIN" ci --no-audit --no-fund); then
     fail "rollback dependency install failed; ${APP_NAME} is left on the broken revision."
     return 1
   fi
 
   if ! (cd "$APP_DIR" && "$NPM_BIN" run build); then
     fail "rollback build failed; ${APP_NAME} is left on the broken revision."
+    return 1
+  fi
+
+  if ! (cd "$APP_DIR" && "$NPM_BIN" prune --omit=dev --no-audit --no-fund); then
+    fail "rollback could not prune development dependencies."
     return 1
   fi
 
@@ -254,6 +268,7 @@ main() {
 
   install_dependencies
   build
+  prune_dependencies
   clear_health
   reload_app "$target"
   # Schema migrations run inside the app at startup, so a successful health
