@@ -1,6 +1,7 @@
 export const BOT_NAME = "Marzano";
 export const VERSION = "0.1.0";
 export const REPOSITORY_URL = "https://github.com/eccemono/marzano";
+export const LICENSE = "MIT";
 export const REQUIRED_NODE_MAJOR = 22;
 
 /**
