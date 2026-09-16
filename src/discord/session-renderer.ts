@@ -1,6 +1,7 @@
 import type { Db } from "../db/database";
 import { getActiveSession, saveActiveSession } from "../db/session-repository";
 import type { TimerSession } from "../domain/timer";
+import { isStopped } from "../domain/timer";
 import type { Logger } from "../logger";
 
 import {
@@ -106,6 +107,12 @@ export class SessionRenderer implements SessionRendererPort {
     presenter.startLoop(
       () => getActiveSession(this.db, guildId),
       (rendered, result) => {
+        // The session can end while this tick is in flight. Writing the row back
+        // would then resurrect one that `stop` has already deleted, leaving a
+        // stopped session behind for the next boot to clean up.
+        const current = getActiveSession(this.db, rendered.guildId);
+        if (!current || isStopped(current)) return;
+
         // The message was replaced after being deleted; remember the new id or
         // every later refresh would try the dead one again.
         if (result.messageId !== rendered.statusMessageId) {

@@ -12,10 +12,10 @@ import { factForBreak } from "../domain/facts";
  * here accumulates, so re-rendering is idempotent and a missed refresh simply
  * shows a slightly stale number rather than a wrong one.
  *
- * The countdown is a Discord timestamp rather than a number we recompute.
- * Discord renders `<t:...:t>` in each client as the reader's own local clock
- * time, so the message says when the stage ends with no bot edits every few
- * seconds - fewer API calls, no rate limits, and nothing to drift.
+ * The countdown is a Discord relative timestamp rather than a number we
+ * recompute. Discord renders `<t:...:R>` in each client and keeps it current on
+ * its own, so "in 24 minutes" stays accurate without the bot editing the message
+ * every second - fewer API calls, no rate limits, and nothing to drift.
  */
 
 export interface SessionEmbedField {
@@ -55,24 +55,23 @@ export function formatDuration(milliseconds: number): string {
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
-/** Progress bar such as `█████▒▒▒▒▒ 50%`. */
+/** Progress bar such as `█████▒▒▒▒▒ 50%`, quantized to whole 10% steps. */
 export function progressBar(elapsed: number, duration: number, width = 10): string {
   const ratio = duration <= 0 ? 0 : Math.min(1, Math.max(0, elapsed / duration));
-  const filled = Math.round(ratio * width);
+  const filled = Math.floor(ratio * width);
 
-  return `${"\u2588".repeat(filled)}${"\u2592".repeat(width - filled)} ${Math.round(ratio * 100)}%`;
+  return `${"\u2588".repeat(filled)}${"\u2592".repeat(width - filled)} ${filled * 10}%`;
 }
 
 /**
- * Discord's client-rendered clock time for a deadline.
+ * Discord's client-rendered relative countdown for a deadline.
  *
- * `t` is the short-time style: each client shows the reader's own local time,
- * so the message says when the stage ends rather than how long is left. A
- * relative countdown ("in 24 minutes") reads the same at a glance but never
- * tells you whether that lands at 3:42 or 4:42.
+ * `R` is the relative style: each client shows "in 24 minutes" and keeps it
+ * updated itself, so the message reads as time remaining rather than a fixed
+ * clock time.
  */
-export function absoluteTimestamp(instant: number): string {
-  return `<t:${Math.floor(instant / 1_000)}:t>`;
+export function relativeTimestamp(instant: number): string {
+  return `<t:${Math.floor(instant / 1_000)}:R>`;
 }
 
 /**
@@ -143,7 +142,7 @@ export function buildSessionEmbed(input: SessionEmbedInput): SessionEmbed {
   const countdown =
     paused || deadline === null
       ? `Paused with ${formatDuration(remaining)} left in this stage.`
-      : `# Ends in ${absoluteTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
+      : `# ${relativeTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
 
   const fields: SessionEmbedField[] = [
     { name: "Cycle", value: cyclePosition(session), inline: true },

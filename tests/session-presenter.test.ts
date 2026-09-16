@@ -20,7 +20,11 @@ function silentLogger() {
 class FakeGateway implements SessionMessageGateway {
   posts: string[] = [];
   edits: { channelId: string; messageId: string }[] = [];
+  /** Payloads in the order their edits *completed*. */
+  payloads: SessionPayload[] = [];
   behaviour: "ok" | "missing" | "transient" = "ok";
+  /** When set, the next edit waits on this before completing. */
+  block: (() => Promise<void>) | null = null;
   private counter = 0;
 
   async post(channelId: string, _payload: SessionPayload): Promise<string> {
@@ -30,8 +34,14 @@ class FakeGateway implements SessionMessageGateway {
     return id;
   }
 
-  async edit(channelId: string, messageId: string, _payload: SessionPayload): Promise<void> {
+  async edit(channelId: string, messageId: string, payload: SessionPayload): Promise<void> {
+    if (this.block) {
+      const wait = this.block;
+      this.block = null;
+      await wait();
+    }
     this.edits.push({ channelId, messageId });
+    this.payloads.push(payload);
     if (this.behaviour === "missing") throw new SessionMessageMissingError();
     if (this.behaviour === "transient") throw new Error("temporarily unavailable");
   }
@@ -61,6 +71,40 @@ function presenter(gateway: FakeGateway, baseIntervalMs?: number): SessionPresen
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("render ordering", () => {
+  it("applies the terminal embed last, even when an edit is already in flight", async () => {
+    // The bug: a refresh tick mid-edit when the session ends landed *after* the
+    // summary and repainted the live view, so stopping appeared not to clear the
+    // status. Renders are serialised, so the last one requested is the last one
+    // applied.
+    const gateway = new FakeGateway();
+    const subject = presenter(gateway);
+    const session = newSession({ statusMessageId: "msg-live" });
+
+    let release = (): void => {};
+    gateway.block = () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+    // A refresh tick is now stuck part-way through its edit.
+    const live = subject.render(session);
+    await Promise.resolve();
+
+    // The session ends while that edit is still outstanding.
+    const terminal = subject.renderWithEmbed(session, {
+      title: "summary",
+      description: "ended",
+      fields: [],
+    });
+
+    release();
+    await Promise.all([live, terminal]);
+
+    expect(gateway.payloads.at(-1)?.embeds[0]?.title).toBe("summary");
+  });
 });
 
 describe("render", () => {

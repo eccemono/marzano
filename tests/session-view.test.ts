@@ -4,12 +4,12 @@ import { BUILT_IN_DEFAULTS } from "../src/domain/config";
 import { TOMATO_FACTS } from "../src/domain/facts";
 import { type TimerSession, pause, startSession, terminate } from "../src/domain/timer";
 import {
-  absoluteTimestamp,
   buildSessionEmbed,
   channelStatusText,
   cyclePosition,
   formatDuration,
   progressBar,
+  relativeTimestamp,
 } from "../src/discord/session-view";
 
 const T0 = 1_760_000_000_000;
@@ -56,6 +56,13 @@ describe("progressBar", () => {
   it("fills with blocks and reports the percentage", () => {
     expect(progressBar(50, 100, 10)).toBe("█████▒▒▒▒▒ 50%");
     expect(progressBar(30, 100, 10)).toBe("███▒▒▒▒▒▒▒ 30%");
+  });
+
+  it("quotes whole 10% steps rather than a rounded number", () => {
+    // The bar and the label move together, one segment per 10%.
+    expect(progressBar(33, 100, 10)).toBe("███▒▒▒▒▒▒▒ 30%");
+    expect(progressBar(39, 100, 10)).toBe("███▒▒▒▒▒▒▒ 30%");
+    expect(progressBar(99, 100, 10)).toBe("█████████▒ 90%");
   });
 
   it("clamps out-of-range input and tolerates a zero duration", () => {
@@ -120,15 +127,15 @@ describe("cyclePosition", () => {
   });
 });
 
-describe("absoluteTimestamp", () => {
-  it("renders a Discord clock-time timestamp in whole seconds", () => {
-    // The short-time style, not the relative one: the message should say when
-    // the stage ends, not how long is left.
-    expect(absoluteTimestamp(1_760_000_000_000)).toBe("<t:1760000000:t>");
+describe("relativeTimestamp", () => {
+  it("renders a Discord relative countdown in whole seconds", () => {
+    // The relative style, not the absolute one: the message should read as time
+    // remaining, and each client keeps it current without the bot editing it.
+    expect(relativeTimestamp(1_760_000_000_000)).toBe("<t:1760000000:R>");
   });
 
   it("rounds down, so it never names a second that has not arrived", () => {
-    expect(absoluteTimestamp(1_760_000_000_999)).toBe("<t:1760000000:t>");
+    expect(relativeTimestamp(1_760_000_000_999)).toBe("<t:1760000000:R>");
   });
 });
 
@@ -174,12 +181,12 @@ describe("buildSessionEmbed", () => {
     expect(longBreak.title).toContain("Long break");
   });
 
-  it("says when the stage ends, not how long is left", () => {
+  it("counts down with a Discord relative timestamp", () => {
     const embed = buildSessionEmbed({ session: newSession(), now: T0 + 10 * MINUTE });
 
-    expect(embed.description).toContain("Ends in <t:1760001500:t>");
-    // The relative form ("in 15 minutes") is deliberately gone.
-    expect(embed.description).not.toContain(":R>");
+    expect(embed.description).toContain("<t:1760001500:R>");
+    // The absolute clock-time form is deliberately gone.
+    expect(embed.description).not.toContain(":t>");
   });
 
   it("does not carry the old auto-refresh footer", () => {

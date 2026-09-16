@@ -73,6 +73,8 @@ export class SessionPresenter {
   private consecutiveFailures = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** Serialises renders. See `enqueue`. */
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor(options: SessionPresenterOptions) {
     this.gateway = options.gateway;
@@ -102,12 +104,51 @@ export class SessionPresenter {
   }
 
   /**
+   * Renders are serialised, so the order they are requested in is the order they
+   * are applied in.
+   *
+   * A refresh tick already in flight when a session ends would otherwise paint
+   * the live view over the terminal summary: the loop has been stopped, but the
+   * HTTP edit is still on its way and lands afterwards. Chaining makes the
+   * terminal render - always requested last - the last word, so a stopped
+   * session cannot leave its live view on screen.
+   */
+  private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.chain.then(work, work);
+    // Keep the chain settled, so one failed render cannot poison later ones.
+    this.chain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  /** Post or refresh the status message for `session`. */
+  render(session: TimerSession): Promise<RenderResult> {
+    return this.enqueue(() => this.renderNow(session));
+  }
+
+  /**
+   * Replace the status message with a final embed and no controls.
+   *
+   * Used for the terminal summary: the session is over, so the buttons would be
+   * dead, and the summary is what the channel should keep.
+   */
+  renderWithEmbed(
+    session: TimerSession,
+    embed: SessionEmbed,
+    components: ActionRowBuilder<ButtonBuilder>[] = [],
+  ): Promise<RenderResult> {
+    return this.enqueue(() => this.renderWithEmbedNow(session, embed, components));
+  }
+
+  /**
    * Post or refresh the status message for `session`.
    *
    * Returns the message id currently in use, and whether it had to be
    * recreated.
    */
-  async render(session: TimerSession): Promise<RenderResult> {
+  private async renderNow(session: TimerSession): Promise<RenderResult> {
     const channelId = session.textChannelId ?? session.voiceChannelId;
     const payload = this.buildPayload(session);
 
@@ -141,13 +182,7 @@ export class SessionPresenter {
     return { messageId, replaced: Boolean(session.statusMessageId) };
   }
 
-  /**
-   * Replace the status message with an arbitrary embed and no controls.
-   *
-   * Used for the terminal summary: the session is over, so the buttons would be
-   * dead, and the summary is what the channel should keep.
-   */
-  async renderWithEmbed(
+  private async renderWithEmbedNow(
     session: TimerSession,
     embed: SessionEmbed,
     components: ActionRowBuilder<ButtonBuilder>[] = [],
