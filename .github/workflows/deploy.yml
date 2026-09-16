@@ -1,0 +1,118 @@
+name: Deploy
+
+# Manual only. There is no push trigger: a production deploy is a decision, and
+# the plan explicitly requires this workflow to be gated behind a protected
+# environment.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm a production deploy'
+        required: true
+        type: string
+      ref:
+        description: "Revision to deploy (defaults to main)"
+        required: false
+        type: string
+        default: main
+
+# Two deploys must never overlap: they would fight over the same checkout and
+# the same PM2 process. Never cancel in progress, because a half-finished deploy
+# is worse than a queued one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+
+    # Gate. Configure required reviewers on this environment in
+    # Settings → Environments, so the job cannot start without approval.
+    environment:
+      name: production
+      url: https://github.com/eccemono/marzano/releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm
+        run: |
+          if [ "${{ inputs.confirm }}" != "deploy" ]; then
+            echo "::error::Confirmation input must be exactly 'deploy' (received '${{ inputs.confirm }}')."
+            exit 1
+          fi
+
+      # Fail loudly on missing configuration rather than skipping the deploy
+      # silently and reporting success. A green run that deployed nothing is
+      # worse than a red one.
+      - name: Check required secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required secret ${name} is not set on this repository."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Deploy aborted: missing secrets. Nothing was deployed."
+            exit 1
+          fi
+
+      - name: Prepare the deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # A dedicated deploy key, never a personal one. It may be scoped on
+          # the server to run this script and nothing else.
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          # The host key is pinned against the checked-in file rather than
+          # discovered, so a man in the middle cannot redirect the deploy.
+          if [ ! -f deploy/known_hosts ]; then
+            echo "::error::deploy/known_hosts is missing; refusing to connect with an unverified host key."
+            exit 1
+          fi
+          chmod 644 deploy/known_hosts
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+
+          ssh -i ~/.ssh/deploy_key \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o UserKnownHostsFile=deploy/known_hosts \
+              -o StrictHostKeyChecking=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "DEPLOY_BRANCH='${{ inputs.ref }}' bash -s" < scripts/deploy-hetzner.sh
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${{ job.status }}"
+            echo ""
+            echo "- ref: \`${{ inputs.ref }}\`"
+            echo ""
+            echo "The deploy script only ever reloads the \`marzano\` PM2 process."
+          } >> "$GITHUB_STEP_SUMMARY"
