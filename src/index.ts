@@ -5,9 +5,10 @@ import { type Client, Events } from "discord.js";
 import { registerCommands } from "./commands/register";
 import { loadConfig } from "./config/env";
 import { openMigratedDatabase } from "./db/bootstrap";
-import { getActiveSession, saveActiveSession } from "./db/session-repository";
+import { getActiveSession, listActiveSessions, saveActiveSession } from "./db/session-repository";
 import { createClient } from "./discord/client";
 import { handleInteraction } from "./discord/handlers";
+import { createHealthReporter } from "./health";
 import { createMessageGateway } from "./discord/message-gateway";
 import { SessionPresenter } from "./discord/session-presenter";
 import { createLogger, type Logger } from "./logger";
@@ -115,6 +116,28 @@ async function main(): Promise<void> {
       graceMs: config.graceMs,
     });
 
+    // The deploy script polls this file to decide whether a deploy succeeded,
+    // so it must reflect the real Discord connection, not just "the process
+    // started".
+    let discordState: "connecting" | "ready" | "disconnected" = "connecting";
+    let recovered = false;
+
+    const health = createHealthReporter({
+      directory: config.dataDir,
+      logger: logger.child({ component: "health" }),
+      commit: process.env.GIT_COMMIT ?? "unknown",
+    });
+
+    health.start(() => ({
+      ready: discordState === "ready" && recovered,
+      discord: discordState,
+      commit: process.env.GIT_COMMIT ?? "unknown",
+      guilds: client.guilds.cache.size,
+      database: "ok",
+      activeSessions: listActiveSessions(db).filter((session) => session.state !== "stopped")
+        .length,
+    }));
+
     let shuttingDown = false;
 
     async function shutdown(signal: string): Promise<void> {
@@ -129,6 +152,7 @@ async function main(): Promise<void> {
           reason: error instanceof Error ? error.message : String(error),
         });
       } finally {
+        health.stop();
         client.destroy();
         process.exit(0);
       }
@@ -145,6 +169,8 @@ async function main(): Promise<void> {
         repository: REPOSITORY_URL,
       });
 
+      discordState = "ready";
+
       void (async () => {
         try {
           const report = await supervisor.recover();
@@ -153,6 +179,11 @@ async function main(): Promise<void> {
           logger.error("recovery failed; starting without resuming sessions", {
             reason: error instanceof Error ? error.message : String(error),
           });
+        } finally {
+          // Ready only once recovery has finished, so a deploy never reports
+          // healthy while sessions are still being reconciled.
+          recovered = true;
+          health.beat();
         }
 
         startRefreshLoops(client, logger, db);
@@ -170,6 +201,11 @@ async function main(): Promise<void> {
           reason: error instanceof Error ? error.message : String(error),
         });
       });
+    });
+
+    client.on(Events.ShardDisconnect, () => {
+      discordState = "disconnected";
+      health.beat();
     });
 
     client.on(Events.InteractionCreate, (interaction) => {

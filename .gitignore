@@ -18,6 +18,10 @@ data/
 *.sqlite
 *.sqlite3
 
+# Health heartbeat written at runtime
+health.json
+health.json.tmp
+
 # Logs
 *.log
 logs/

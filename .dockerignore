@@ -1,14 +1,51 @@
-# Keep the build context minimal. Secrets, runtime data and VCS metadata must
-# never be baked into an image.
-.git
-.github
-node_modules
-dist
-data
-coverage
+# Build context exclusions.
+#
+# Marzano does not ship a Docker image today, but a Dockerfile is a likely
+# addition, and this file is the safety net that stops a build from baking
+# credentials or runtime state into an image layer. Layer contents are visible
+# to anyone who can pull the image, so this is a security boundary, not tidiness.
+
+# Secrets - never in an image, under any circumstances
 .env
 .env.*
 !.env.example
-deployments.private*
+*.pem
+*.key
+deploy_key
+known_hosts.bak
+
+# Runtime state
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+health.json*
+
+# Build output and dependencies (rebuilt inside the image)
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Tests and tooling
+tests/
+scripts/
+.github/
+.vscode/
+.idea/
+coverage/
 *.log
-.opencode
+logs/
+
+# Documentation is not needed at runtime
+docs/
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+
+# VCS and local noise
+.git/
+.gitignore
+.dockerignore
+.DS_Store
