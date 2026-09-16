@@ -1,148 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { openInMemoryDatabase } from "../src/db/database";
-import { migrate } from "../src/db/migrations";
 import {
   getActiveSession,
   listActiveSessions,
   saveActiveSession,
 } from "../src/db/session-repository";
-import { BUILT_IN_DEFAULTS } from "../src/domain/config";
-import { pause, startSession, type TimerSession } from "../src/domain/timer";
-import type { SessionPresenter } from "../src/discord/session-presenter";
-import { createLogger } from "../src/logger";
-import type { ScheduleFn, TimerHandle, VoiceAudience } from "../src/session/ports";
-import { SessionSupervisor } from "../src/session/supervisor";
-import type { SessionVoice } from "../src/voice/manager";
-
-const GUILD = "111111111111111111";
-const GUILD_B = "444444444444444444";
-const CHANNEL = "222222222222222222";
-const MINUTE = 60_000;
-const START = 1_760_000_000_000;
-
-function silentLogger() {
-  return createLogger({ level: "error", sink: () => {} });
-}
-
-const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
-
-/**
- * A controllable clock and timer queue.
- *
- * Session behaviour is almost entirely about time, so the tests drive time
- * directly rather than sleeping. `advanceTo` moves the clock and fires whatever
- * has come due in order.
- */
-class FakeTimers {
-  now = START;
-  private pending: { id: number; at: number; fn: () => void }[] = [];
-  private nextId = 1;
-  /** Delays requested, in order, for assertions about scheduling. */
-  readonly delays: number[] = [];
-
-  readonly schedule: ScheduleFn = (delayMs: number, fn: () => void): TimerHandle => {
-    const entry = { id: this.nextId++, at: this.now + delayMs, fn };
-    this.pending.push(entry);
-    this.delays.push(delayMs);
-    return {
-      cancel: () => {
-        this.pending = this.pending.filter((candidate) => candidate.id !== entry.id);
-      },
-    };
-  };
-
-  get pendingCount(): number {
-    return this.pending.length;
-  }
-
-  async advanceTo(instant: number): Promise<void> {
-    this.now = instant;
-    const due = this.pending.filter((entry) => entry.at <= this.now);
-    this.pending = this.pending.filter((entry) => entry.at > this.now);
-
-    for (const entry of due) entry.fn();
-    await flush();
-  }
-}
-
-class FakeVoice {
-  joins: string[] = [];
-  leaves = 0;
-  startCues = 0;
-  transitions = 0;
-
-  async join(session: { voiceChannelId: string }): Promise<boolean> {
-    this.joins.push(session.voiceChannelId);
-    return true;
-  }
-  async leave(): Promise<void> {
-    this.leaves += 1;
-  }
-  async announceStart(): Promise<void> {
-    this.startCues += 1;
-  }
-  async announceTransition(): Promise<void> {
-    this.transitions += 1;
-  }
-}
-
-class FakePresenter {
-  renders: TimerSession[] = [];
-  nextMessageId = "message-1";
-
-  async render(session: TimerSession) {
-    this.renders.push(session);
-    return { messageId: session.statusMessageId ?? this.nextMessageId, replaced: false };
-  }
-}
-
-class FakeAudience implements VoiceAudience {
-  humans: string[] | null = ["user-1"];
-  exists = true;
-
-  async channelExists(): Promise<boolean> {
-    return this.exists;
-  }
-  async humanMembers(): Promise<string[] | null> {
-    return this.humans;
-  }
-}
-
-function setup(options: { graceMs?: number } = {}) {
-  const db = openInMemoryDatabase();
-  migrate(db);
-  const timers = new FakeTimers();
-  const voice = new FakeVoice();
-  const presenter = new FakePresenter();
-  const audience = new FakeAudience();
-
-  const supervisor = new SessionSupervisor({
-    db,
-    voice: voice as unknown as SessionVoice,
-    presenter: presenter as unknown as SessionPresenter,
-    audience,
-    logger: silentLogger(),
-    now: () => timers.now,
-    schedule: (delayMs, fn) => timers.schedule(delayMs, fn),
-    ...(options.graceMs === undefined ? {} : { graceMs: options.graceMs }),
-  });
-
-  return { db, timers, voice, presenter, audience, supervisor };
-}
-
-function newSession(overrides: Partial<TimerSession> = {}): TimerSession {
-  return {
-    ...startSession({
-      guildId: GUILD,
-      voiceChannelId: CHANNEL,
-      textChannelId: CHANNEL,
-      config: { ...BUILT_IN_DEFAULTS, focusMinutes: 25, shortBreakMinutes: 5 },
-      now: START,
-    }),
-    ...overrides,
-  };
-}
+import { pause } from "../src/domain/timer";
+import {
+  CHANNEL,
+  GUILD,
+  GUILD_B,
+  MINUTE,
+  START,
+  flush,
+  newSession,
+  setup,
+} from "./helpers/harness";
 
 describe("begin", () => {
   it("persists the session, schedules its first wake and plays the cue", async () => {
