@@ -5,10 +5,49 @@ import { type Client, Events } from "discord.js";
 import { registerCommands } from "./commands/register";
 import { loadConfig } from "./config/env";
 import { openMigratedDatabase } from "./db/bootstrap";
+import { getActiveSession, saveActiveSession } from "./db/session-repository";
 import { createClient } from "./discord/client";
 import { handleInteraction } from "./discord/handlers";
-import { createLogger } from "./logger";
+import { createMessageGateway } from "./discord/message-gateway";
+import { SessionPresenter } from "./discord/session-presenter";
+import { createLogger, type Logger } from "./logger";
 import { BOT_NAME, REPOSITORY_URL, VERSION, assertSupportedNode } from "./runtime";
+
+/**
+ * One presenter per guild.
+ *
+ * The refresh loop is per-session, and because a guild holds at most one
+ * session, a presenter per guild is enough. Supervision of these loops across
+ * restarts belongs to the lifecycle task.
+ */
+function startRefreshLoops(
+  client: Client,
+  logger: Logger,
+  db: ReturnType<typeof openMigratedDatabase>["db"],
+  presenters: Map<string, SessionPresenter>,
+): void {
+  for (const guild of client.guilds.cache.values()) {
+    const session = getActiveSession(db, guild.id);
+    if (!session || session.state === "stopped") continue;
+
+    const presenter = new SessionPresenter({
+      gateway: createMessageGateway(client),
+      logger: logger.child({ component: "session", guildId: guild.id }),
+    });
+    presenters.set(guild.id, presenter);
+
+    presenter.startLoop(
+      () => getActiveSession(db, guild.id),
+      (rendered, result) => {
+        if (result.messageId !== rendered.statusMessageId) {
+          saveActiveSession(db, { ...rendered, statusMessageId: result.messageId });
+        }
+      },
+    );
+
+    logger.info("resumed status refresh", { guildId: guild.id });
+  }
+}
 
 async function main(): Promise<void> {
   const bootstrap = createLogger();
@@ -34,9 +73,18 @@ async function main(): Promise<void> {
 
     const client: Client = createClient();
     const startedAt = Date.now();
+    const presenters = new Map<string, SessionPresenter>();
+
+    // A single shared presenter handles session starts from commands; the
+    // per-guild loops above are tracked separately.
+    const commandPresenter = new SessionPresenter({
+      gateway: createMessageGateway(client),
+      logger: logger.child({ component: "session-command" }),
+    });
 
     const handlerDeps = {
       db,
+      presenter: commandPresenter,
       uptimeSeconds: () => Math.floor((Date.now() - startedAt) / 1_000),
       gatewayLatencyMs: () => client.ws.ping,
       guildCount: () => client.guilds.cache.size,
@@ -50,6 +98,8 @@ async function main(): Promise<void> {
         version: VERSION,
         repository: REPOSITORY_URL,
       });
+
+      startRefreshLoops(client, logger, db, presenters);
     });
 
     client.on(Events.InteractionCreate, (interaction) => {

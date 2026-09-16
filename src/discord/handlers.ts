@@ -8,6 +8,8 @@ import { SplitError } from "../domain/split";
 import { remainingMs, startSession, terminate } from "../domain/timer";
 import { SPLIT_INPUT_ID, SPLIT_MODAL_ID, buildSplitModal } from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
+import { handleSessionButton } from "./session-buttons";
+import type { SessionPresenter } from "./session-presenter";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import { INFO_COMMAND, POMODORO_COMMAND, type PomodoroSubcommand } from "../commands/definitions";
@@ -25,6 +27,7 @@ import { WizardError, applyChannelWizard, applyGuildDefaultsWizard } from "../co
 
 export interface HandlerDeps {
   db: Db;
+  presenter: SessionPresenter;
   uptimeSeconds(): number;
   gatewayLatencyMs(): number;
   guildCount(): number;
@@ -39,7 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export function callerVoiceChannelId(interaction: ChatInputCommandInteraction): string | null {
+export function callerVoiceChannelId(interaction: { member?: unknown }): string | null {
   const member: unknown = interaction.member;
   if (!isRecord(member) || !isRecord(member.voice)) return null;
   const channelId = member.voice.channelId;
@@ -120,9 +123,14 @@ async function handleStart(
   });
   saveActiveSession(deps.db, session);
 
+  // Post the canonical status message and remember its id, so later refreshes
+  // edit this one instead of posting duplicates.
+  const rendered = await deps.presenter.render(session);
+  saveActiveSession(deps.db, { ...session, statusMessageId: rendered.messageId });
+
   await interaction.reply(
     ephemeral(
-      `Session started - focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m.`,
+      `Session started - focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m. Controls are in the channel.`,
     ),
   );
 }
@@ -316,6 +324,15 @@ export async function handleInteraction(
   interaction: Interaction,
   deps: HandlerDeps,
 ): Promise<void> {
+  if (interaction.isButton()) {
+    await handleSessionButton(interaction, {
+      db: deps.db,
+      presenter: deps.presenter,
+      voiceChannelIdOf: callerVoiceChannelId,
+    });
+    return;
+  }
+
   if (interaction.isModalSubmit()) {
     await handleModalSubmit(interaction, deps);
     return;
