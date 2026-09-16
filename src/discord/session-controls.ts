@@ -24,10 +24,14 @@ export const SESSION_BUTTON_IDS = {
   modify: "marzano:session:modify",
   extend2: "marzano:session:extend2",
   extend5: "marzano:session:extend5",
+  changeSplit: "marzano:session:split",
   toggleSound: "marzano:session:sound",
   confirm: "marzano:session:confirm",
   cancel: "marzano:session:cancel",
 } as const;
+
+/** Modal shown when changing the split of a running session. */
+export const SESSION_SPLIT_MODAL_ID = "marzano:session:split-modal";
 
 export type SessionButtonId = (typeof SESSION_BUTTON_IDS)[keyof typeof SESSION_BUTTON_IDS];
 
@@ -38,6 +42,7 @@ export type SessionAction =
   | "stop"
   | "modify"
   | "extend"
+  | "change_split"
   | "toggle_sound";
 
 /** Actions that discard work in progress, so they ask first. */
@@ -50,6 +55,7 @@ const ACTION_LABELS: Record<SessionAction, string> = {
   stop: "Stop",
   modify: "Modify",
   extend: "Add time",
+  change_split: "Change split",
   toggle_sound: "Change sound",
 };
 
@@ -68,6 +74,7 @@ const BUTTON_ACTION: Record<string, SessionAction> = {
   [SESSION_BUTTON_IDS.modify]: "modify",
   [SESSION_BUTTON_IDS.extend2]: "extend",
   [SESSION_BUTTON_IDS.extend5]: "extend",
+  [SESSION_BUTTON_IDS.changeSplit]: "change_split",
   [SESSION_BUTTON_IDS.toggleSound]: "toggle_sound",
 };
 

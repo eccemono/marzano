@@ -61,6 +61,10 @@ export function buildModifyComponents(): ActionRowBuilder<ButtonBuilder>[] {
       .setLabel("+5 minutes")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
+      .setCustomId(SESSION_BUTTON_IDS.changeSplit)
+      .setLabel("Change split")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
       .setCustomId(SESSION_BUTTON_IDS.toggleSound)
       .setLabel("Sound on/off")
       .setStyle(ButtonStyle.Secondary),

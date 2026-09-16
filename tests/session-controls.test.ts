@@ -11,6 +11,7 @@ import {
   parseConfirmationId,
   requiresConfirmation,
 } from "../src/discord/session-controls";
+import { EXTEND_BUTTON_MS, buildModifyComponents } from "../src/discord/session-components";
 
 const SESSION_VOICE = "222222222222222222";
 const OTHER_VOICE = "333333333333333333";
@@ -38,6 +39,7 @@ describe("requiresConfirmation", () => {
     expect(requiresConfirmation("pause")).toBe(false);
     expect(requiresConfirmation("resume")).toBe(false);
     expect(requiresConfirmation("extend")).toBe(false);
+    expect(requiresConfirmation("change_split")).toBe(false);
     expect(requiresConfirmation("toggle_sound")).toBe(false);
   });
 });
@@ -123,6 +125,7 @@ describe("button id mapping", () => {
     expect(actionForButtonId(SESSION_BUTTON_IDS.modify)).toBe("modify");
     expect(actionForButtonId(SESSION_BUTTON_IDS.extend2)).toBe("extend");
     expect(actionForButtonId(SESSION_BUTTON_IDS.extend5)).toBe("extend");
+    expect(actionForButtonId(SESSION_BUTTON_IDS.changeSplit)).toBe("change_split");
     expect(actionForButtonId(SESSION_BUTTON_IDS.toggleSound)).toBe("toggle_sound");
   });
 
@@ -175,9 +178,31 @@ describe("actionLabel", () => {
       "stop",
       "modify",
       "extend",
+      "change_split",
       "toggle_sound",
     ] as const) {
       expect(actionLabel(action).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("modify menu", () => {
+  it("offers the extend buttons, a split change and a sound toggle", () => {
+    const rows = buildModifyComponents();
+    const ids = rows.flatMap((row) =>
+      row.components.map((component) => (component.data as { custom_id?: string }).custom_id),
+    );
+
+    expect(ids).toEqual([
+      SESSION_BUTTON_IDS.extend2,
+      SESSION_BUTTON_IDS.extend5,
+      SESSION_BUTTON_IDS.changeSplit,
+      SESSION_BUTTON_IDS.toggleSound,
+    ]);
+  });
+
+  it("maps the extend buttons to two and five minutes", () => {
+    expect(EXTEND_BUTTON_MS[SESSION_BUTTON_IDS.extend2]).toBe(2 * 60_000);
+    expect(EXTEND_BUTTON_MS[SESSION_BUTTON_IDS.extend5]).toBe(5 * 60_000);
   });
 });

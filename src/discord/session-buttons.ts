@@ -21,6 +21,7 @@ import {
 } from "./session-components";
 import {
   SESSION_BUTTON_IDS,
+  SESSION_SPLIT_MODAL_ID,
   type SessionAction,
   actionForButtonId,
   actionLabel,
@@ -28,6 +29,7 @@ import {
   parseConfirmationId,
 } from "./session-controls";
 import type { SessionPresenter } from "./session-presenter";
+import { buildSplitModal, formatSplit } from "./modals";
 
 /**
  * The session control buttons.
@@ -97,6 +99,9 @@ function applyAction(
     }
     case "modify":
       return { session, note: "", remove: false };
+    case "change_split":
+      // Handled by the caller, which opens a modal rather than mutating here.
+      return { session, note: "", remove: false };
   }
 }
 
@@ -153,6 +158,20 @@ export async function handleSessionButton(
       ...ephemeral("Adjust the running session."),
       components: buildModifyComponents(),
     });
+    return;
+  }
+
+  if (resolved === "change_split") {
+    const modal = buildSplitModal({
+      title: "Change the split",
+      initialSplit: formatSplit({
+        focusMinutes: stored.config.focusMinutes,
+        shortBreakMinutes: stored.config.shortBreakMinutes,
+        longBreakMinutes: stored.config.longBreakMinutes,
+      }),
+    }).setCustomId(SESSION_SPLIT_MODAL_ID);
+
+    await interaction.showModal(modal);
     return;
   }
 

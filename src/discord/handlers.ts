@@ -4,11 +4,12 @@ import { getChannelConfig } from "../db/config-repository";
 import type { Db } from "../db/database";
 import { deleteActiveSession, getActiveSession, saveActiveSession } from "../db/session-repository";
 import { BUILT_IN_DEFAULTS, resolveConfig } from "../domain/config";
-import { SplitError } from "../domain/split";
-import { remainingMs, startSession, terminate } from "../domain/timer";
+import { SplitError, parseSplit } from "../domain/split";
+import { changeSplit, isStopped, remainingMs, startSession, terminate } from "../domain/timer";
 import { SPLIT_INPUT_ID, SPLIT_MODAL_ID, buildSplitModal } from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
+import { SESSION_SPLIT_MODAL_ID, authorizeControl } from "./session-controls";
 import type { SessionPresenter } from "./session-presenter";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
@@ -285,8 +286,73 @@ async function handleStop(
   await interaction.reply(ephemeral(`Stopped the session in <#${session.voiceChannelId}>.`));
 }
 
+/**
+ * Change the split for the running session only.
+ *
+ * The running stage keeps its existing deadline; the new durations apply from
+ * the next stage. The channel's saved configuration is deliberately untouched,
+ * so a mid-session experiment does not become permanent.
+ */
+async function handleSessionSplitModal(interaction: Interaction, deps: HandlerDeps): Promise<void> {
+  if (!interaction.isModalSubmit()) return;
+
+  const guildId = interaction.guildId ?? null;
+  if (!guildId) {
+    await interaction.reply(ephemeral("Marzano only works inside a server."));
+    return;
+  }
+
+  const session = getActiveSession(deps.db, guildId);
+  if (!session || isStopped(session)) {
+    await interaction.reply(ephemeral("No session is running in this server."));
+    return;
+  }
+
+  const decision = authorizeControl({
+    action: "change_split",
+    callerVoiceChannelId: callerVoiceChannelId(interaction),
+    sessionVoiceChannelId: session.voiceChannelId,
+    permissions: interaction.memberPermissions?.bitfield ?? 0n,
+  });
+
+  if (!decision.allowed) {
+    await interaction.reply(ephemeral(decision.reason ?? "You cannot do that."));
+    return;
+  }
+
+  try {
+    const split = parseSplit(interaction.fields.getTextInputValue(SPLIT_INPUT_ID));
+    const updated = changeSplit(session, split);
+    saveActiveSession(deps.db, updated);
+
+    const rendered = await deps.presenter.render(updated);
+    if (rendered.messageId !== updated.statusMessageId) {
+      saveActiveSession(deps.db, { ...updated, statusMessageId: rendered.messageId });
+    }
+
+    await interaction.reply(
+      ephemeral(
+        `Split changed for this session: focus ${split.focusMinutes}m, short break ${split.shortBreakMinutes}m, long break ${split.longBreakMinutes}m. The current stage keeps its remaining time.`,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof SplitError) {
+      await interaction.reply(ephemeral(error.message));
+      return;
+    }
+    throw error;
+  }
+}
+
 async function handleModalSubmit(interaction: Interaction, deps: HandlerDeps): Promise<void> {
   if (!interaction.isModalSubmit()) return;
+
+  // Changing the split of a running session is a session-scoped action and
+  // never writes to the channel's saved configuration.
+  if (interaction.customId === SESSION_SPLIT_MODAL_ID) {
+    await handleSessionSplitModal(interaction, deps);
+    return;
+  }
 
   const channelId = parseSplitModalId(interaction.customId);
   if (!channelId) return;
