@@ -61,6 +61,41 @@ npm run build
 npm start
 ```
 
+### Inviting the bot
+
+Marzano needs **only five permissions**, and asks for no privileged intents:
+
+| Permission | Why |
+| --- | --- |
+| View Channels | To see the voice channel a command was used in |
+| Send Messages | To post the status message |
+| Embed Links | The status message is an embed |
+| Connect | To join the voice channel |
+| Speak | To play the cue sounds |
+
+`bot` and `applications.commands` are the only OAuth2 scopes required:
+
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&scope=bot+applications.commands&permissions=3165184
+```
+
+`3165184` is exactly the five permissions above. **Do not grant Administrator.**
+Marzano never needs it: it only ever changes its own voice state, and it never
+requests permission to move, mute or disconnect anyone else.
+
+### Enabling the bot
+
+1. Create an application at <https://discord.com/developers/applications>.
+2. Under **Bot**, reset the token and copy it. Put it in `.env` directly on the
+   host - never paste it into chat, an issue, or a commit.
+3. Under **Installation**, add the `bot` and `applications.commands` scopes and
+   the five permissions above.
+4. Invite the bot with the URL above.
+
+No privileged intents need enabling in the Developer Portal. **Message Content
+stays off**, which is why `/info` and every other entry point is a slash
+command: Marzano never reads message text.
+
 ## Development
 
 ```bash
@@ -88,12 +123,28 @@ annotated list.
 | `CLIENT_ID` | yes | - | Application ID, used to register slash commands. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn` or `error`. |
 | `DATA_DIR` | no | `./data` | Where the SQLite database lives. Production uses `/srv/marzano`. |
-| `FFMPEG_PATH` | no | `ffmpeg` | Path to the FFmpeg binary. |
+| `SOUNDS_DIR` | no | `./assets/sounds` | Directory holding the generated cue sounds. |
+| `GRACE_MS` | no | `60000` | How long the last participant can be absent before the session ends. |
+| `SHUTDOWN_TIMEOUT_MS` | no | `5000` | Bound on graceful shutdown. Must be under the process manager's kill timeout. |
 | `DEV_GUILD_ID` | no | - | Register commands in one guild for instant updates while developing. |
 
-## Commands
+FFmpeg is not required and `FFMPEG_PATH` is no longer used by the audio path;
+see [Cue sounds](#cue-sounds).
 
-> Intended interface; implemented across the roadmap tasks below.
+### Configuration precedence
+
+Settings are layered, and the highest layer that mentions a field wins:
+
+```
+built-in defaults  →  server defaults  →  voice-channel settings  →  in-session changes
+```
+
+Each layer only states what it changes, so a channel can override its split
+without restating the sound settings. **In-session changes** - the Modify menu's
+sound toggle or split change - apply to the running session only and never write
+back to the saved channel configuration.
+
+## Commands
 
 | Command | Who | What it does |
 | --- | --- | --- |
@@ -103,6 +154,21 @@ annotated list.
 | `/pomodoro default` | Manage Guild | Server-wide defaults for newly configured channels. |
 | `/pomodoro stop` | VC participants | Ends the session. |
 | `/info` | anyone | Version, uptime, latency and a link to this repository. |
+
+Session controls are buttons on the status message rather than commands, and
+every press re-checks that you are in the session's voice channel.
+
+| Control | Who | Notes |
+| --- | --- | --- |
+| Pause / Resume | participants | |
+| Skip | participants | Asks for confirmation |
+| Stop | participants | Asks for confirmation |
+| Modify | participants | +2 min, +5 min, change split, sound on/off |
+
+Members with **Manage Channels** may force-stop a session they are not part of,
+so a session whose participants all left cannot hold the bot's single voice
+connection indefinitely. They cannot pause, skip or modify one from outside,
+because those change what the people actually in the call are doing.
 
 ### Split syntax
 
@@ -121,10 +187,17 @@ Splits can be typed flexibly:
   voice connection per server. If Marzano is already running in one voice
   channel, a second `start` is rejected and points at the channel that owns the
   session. Separate servers can run sessions concurrently.
-- **No spoken announcements.** Discord gives bots no text-to-speech. The
-  starting cue is committed audio, not synthesised speech.
+- **No spoken announcements.** Every cue is a generated tone. Marzano has no
+  text-to-speech and no voice announcements; stage changes are marked by a bell
+  alone.
 - **Sounds come from generated assets.** No third-party audio is bundled, so the
   bells are synthesised by a script in this repository.
+- **A session ends when everyone leaves.** After a 60 second grace period
+  (`GRACE_MS`) with nobody in the channel, the session stops. The grace period
+  cancels if someone returns.
+- **Offline time is caught up, but silently.** If the bot restarts mid-session
+  it advances across any boundaries that elapsed while it was down. The bells
+  for those boundaries are deliberately not replayed; the count is logged.
 
 ## Cue sounds
 

@@ -66,6 +66,10 @@ export interface RecoveryReport {
   unrecoverable: number;
 }
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function idle(): WakeOutcome {
   return { transitions: 0, bellsPlayed: 0, bellsSkipped: 0, stopped: false };
 }
@@ -112,8 +116,9 @@ export class SessionSupervisor {
   async begin(session: TimerSession): Promise<void> {
     saveActiveSession(this.db, session);
     this.scheduleStageWake(session);
-    // Fire and forget: the cue must never delay the interaction that started it.
-    void this.voice.announceStart(session);
+    // Fire and forget: the cue must never delay the interaction that started
+    // it - but it must still not become an unhandled rejection.
+    this.detach(session.guildId, "start cue", this.voice.announceStart(session));
   }
 
   /**
@@ -125,7 +130,7 @@ export class SessionSupervisor {
   announceTransition(guildId: string): void {
     const session = getActiveSession(this.db, guildId);
     if (!session || isStopped(session)) return;
-    void this.voice.announceTransition(session);
+    this.detach(guildId, "stage bell", this.voice.announceTransition(session));
   }
 
   /**
@@ -178,7 +183,7 @@ export class SessionSupervisor {
         // Several boundaries at once still produce a single bell: a burst would
         // be noise, and the ring is a cue that the stage changed, not a count.
         bellsPlayed = 1;
-        void this.voice.announceTransition(advanced);
+        this.detach(guildId, "stage bell", this.voice.announceTransition(advanced));
       } else {
         bellsSkipped = transitions.length;
       }
@@ -306,7 +311,7 @@ export class SessionSupervisor {
     this.graceTimers.set(
       guildId,
       this.schedule(this.graceMs, () => {
-        void this.expireGrace(guildId);
+        this.detach(guildId, "grace expiry", this.expireGrace(guildId));
       }),
     );
   }
@@ -412,6 +417,19 @@ export class SessionSupervisor {
     });
   }
 
+  /**
+   * Run a floating promise without letting it become an unhandled rejection.
+   *
+   * A scheduled callback has no caller to return an error to, so a failure -
+   * a database write, say - must be reported here or it takes the process down
+   * with an unhandled rejection instead.
+   */
+  private detach(guildId: string, label: string, work: Promise<unknown>): void {
+    void work.catch((error: unknown) => {
+      this.logger.error(`${label} failed`, { guildId, reason: describe(error) });
+    });
+  }
+
   private scheduleStageWake(session: ActiveSessionRecord): void {
     this.clearStageTimer(session.guildId);
 
@@ -424,7 +442,11 @@ export class SessionSupervisor {
     this.stageTimers.set(
       session.guildId,
       this.schedule(delayMs, () => {
-        void this.wake(session.guildId, { announce: true });
+        this.detach(
+          session.guildId,
+          "session wake",
+          this.wake(session.guildId, { announce: true }),
+        );
       }),
     );
   }
