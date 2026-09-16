@@ -10,6 +10,7 @@
  * moment the project moves to ESM.
  */
 
+const { execFileSync } = require("node:child_process");
 const { existsSync, readdirSync } = require("node:fs");
 const { join } = require("node:path");
 
@@ -47,6 +48,24 @@ function resolveNode22(root = NODE_ROOT) {
 }
 
 const interpreter = process.env.NODE22_BIN || resolveNode22();
+
+/**
+ * The revision that is actually deployed.
+ *
+ * Read from the checkout at load time, so the answer is right for a plain
+ * `pm2 reload` as well as for the deploy script (which also sets GIT_COMMIT in
+ * the environment). Without this a manual restart reports "unknown" and the
+ * health snapshot stops being able to tell you what is running.
+ */
+function resolveCommit(appDir) {
+  if (process.env.GIT_COMMIT) return process.env.GIT_COMMIT;
+
+  try {
+    return execFileSync("git", ["-C", appDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 const APP_DIR = process.env.MARZANO_APP_DIR || "/opt/marzano";
 const DATA_DIR = process.env.MARZANO_DATA_DIR || "/srv/marzano";
@@ -86,6 +105,7 @@ module.exports = {
         NODE_ENV: "production",
         DATA_DIR,
         SOUNDS_DIR: join(APP_DIR, "assets", "sounds"),
+        GIT_COMMIT: resolveCommit(APP_DIR),
       },
 
       // Keep logs bounded on a host with limited disk.
