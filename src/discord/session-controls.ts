@@ -46,7 +46,7 @@ export type SessionAction =
   | "toggle_sound";
 
 /** Actions that discard work in progress, so they ask first. */
-export const DESTRUCTIVE_ACTIONS: readonly SessionAction[] = ["skip", "stop"];
+export const DESTRUCTIVE_ACTIONS: readonly SessionAction[] = ["stop"];
 
 const ACTION_LABELS: Record<SessionAction, string> = {
   pause: "Pause",
@@ -87,7 +87,7 @@ export function actionForButtonId(customId: string): SessionAction | null {
  * the only state needed - nothing has to be remembered between the click that
  * asks and the click that answers.
  */
-const CONFIRMABLE_ACTIONS: readonly SessionAction[] = ["skip", "stop"];
+const CONFIRMABLE_ACTIONS: readonly SessionAction[] = ["stop"];
 
 export function confirmIdFor(action: SessionAction): string {
   return `${SESSION_BUTTON_IDS.confirm}:${action}`;

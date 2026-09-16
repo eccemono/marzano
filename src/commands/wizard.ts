@@ -38,6 +38,8 @@ export interface WizardInput {
   cycles?: number | null;
   sound?: boolean | null;
   volume?: number | null;
+  /** Whether a stage advances on its own, rather than waiting for Continue. */
+  auto?: boolean | null;
   /** Copy the saved configuration from this voice channel first. */
   copyFromChannelId?: string | null;
   /** Forget the saved configuration entirely. */
@@ -58,6 +60,7 @@ function hasAnyChange(input: WizardInput): boolean {
     input.cycles != null ||
     input.sound != null ||
     input.volume != null ||
+    input.auto != null ||
     input.copyFromChannelId != null
   );
 }
@@ -101,6 +104,10 @@ function applyValues(base: PartialConfig, input: WizardInput, changed: string[])
   if (input.volume != null) {
     next.soundVolume = input.volume;
     changed.push("volume");
+  }
+  if (input.auto != null) {
+    next.autoAdvance = input.auto;
+    changed.push("auto");
   }
 
   return next;

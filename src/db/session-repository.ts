@@ -43,6 +43,8 @@ interface ActiveSessionRow {
   cycles_before_long_break: number;
   sound_enabled: number;
   sound_volume: number;
+  auto_advance: number;
+  awaiting_continue: number;
   stop_reason: string | null;
   updated_at: string;
 }
@@ -68,6 +70,7 @@ function rowToRecord(row: ActiveSessionRow): ActiveSessionRecord {
     stageStartedAt: row.stage_started_at,
     stageEndsAt: row.stage_ends_at,
     pausedRemainingMs: row.paused_remaining_ms,
+    awaitingContinue: row.awaiting_continue === 1,
     completedFocusStages: row.completed_focus_stages,
     config: {
       focusMinutes: row.focus_minutes,
@@ -76,6 +79,7 @@ function rowToRecord(row: ActiveSessionRow): ActiveSessionRecord {
       cyclesBeforeLongBreak: row.cycles_before_long_break,
       soundEnabled: row.sound_enabled === 1,
       soundVolume: row.sound_volume,
+      autoAdvance: row.auto_advance === 1,
     },
     stopReason: row.stop_reason,
   };
@@ -105,12 +109,14 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
        guild_id, voice_channel_id, text_channel_id, status_message_id,
        stage, state, stage_started_at, stage_ends_at, paused_remaining_ms,
        completed_focus_stages, focus_minutes, short_break_minutes, long_break_minutes,
-       cycles_before_long_break, sound_enabled, sound_volume, stop_reason, updated_at
+       cycles_before_long_break, sound_enabled, sound_volume, auto_advance,
+       awaiting_continue, stop_reason, updated_at
      ) VALUES (
        @guild_id, @voice_channel_id, @text_channel_id, @status_message_id,
        @stage, @state, @stage_started_at, @stage_ends_at, @paused_remaining_ms,
        @completed_focus_stages, @focus_minutes, @short_break_minutes, @long_break_minutes,
-       @cycles_before_long_break, @sound_enabled, @sound_volume, @stop_reason, @updated_at
+       @cycles_before_long_break, @sound_enabled, @sound_volume, @auto_advance,
+       @awaiting_continue, @stop_reason, @updated_at
      )
      ON CONFLICT (guild_id) DO UPDATE SET
        voice_channel_id         = excluded.voice_channel_id,
@@ -128,6 +134,8 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
        cycles_before_long_break = excluded.cycles_before_long_break,
        sound_enabled            = excluded.sound_enabled,
        sound_volume             = excluded.sound_volume,
+       auto_advance             = excluded.auto_advance,
+       awaiting_continue        = excluded.awaiting_continue,
        stop_reason              = excluded.stop_reason,
        updated_at               = excluded.updated_at`,
   ).run({
@@ -140,6 +148,7 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
     stage_started_at: record.stageStartedAt,
     stage_ends_at: record.stageEndsAt,
     paused_remaining_ms: record.pausedRemainingMs,
+    awaiting_continue: record.awaitingContinue ? 1 : 0,
     completed_focus_stages: record.completedFocusStages,
     focus_minutes: record.config.focusMinutes,
     short_break_minutes: record.config.shortBreakMinutes,
@@ -147,6 +156,7 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
     cycles_before_long_break: record.config.cyclesBeforeLongBreak,
     sound_enabled: record.config.soundEnabled ? 1 : 0,
     sound_volume: record.config.soundVolume,
+    auto_advance: record.config.autoAdvance ? 1 : 0,
     stop_reason: record.stopReason,
     updated_at: new Date().toISOString(),
   });

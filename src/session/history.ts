@@ -24,6 +24,7 @@ import {
   detachRun,
   finishRun,
   getRun,
+  leaderboardTotals,
   openAttendance,
   recordStage,
   runTotals,
@@ -31,7 +32,13 @@ import {
   stageCounts as stageOutcomes,
   startRun,
 } from "../db/history-repository";
-import { type MemberTotals, creditForStage, mergeIntervals, stageKind } from "../domain/attendance";
+import {
+  type MemberTotals,
+  creditForStage,
+  mergeIntervals,
+  periodBounds,
+  stageKind,
+} from "../domain/attendance";
 import type { Logger } from "../logger";
 
 export type StageEnding = "completed" | "skipped" | "interrupted";
@@ -175,5 +182,10 @@ export class SessionHistory {
   /** Drop in-memory presence without touching history. Used on shutdown. */
   forget(guildId: string): void {
     this.present.delete(guildId);
+  }
+
+  /** The guild's monthly leaderboard, for the summary's footer. */
+  leaderboard(guildId: string, now: number): MemberTotals[] {
+    return leaderboardTotals(this.db, guildId, periodBounds("monthly", now));
   }
 }

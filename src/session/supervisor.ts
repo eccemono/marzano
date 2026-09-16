@@ -431,6 +431,7 @@ export class SessionSupervisor {
           endedAt: report.endedAt,
           outcomes: report.outcomes,
           totals: report.totals,
+          monthlyLeaderboard: this.history?.leaderboard(guildId, this.now()) ?? [],
         }),
       );
     } else {

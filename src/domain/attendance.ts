@@ -227,3 +227,40 @@ export function formatCredit(milliseconds: number): string {
   if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
   return `${minutes}m`;
 }
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+/**
+ * The natural name of a leaderboard period, e.g. "September 2026".
+ *
+ * The calendar boundary is still UTC; only the *presentation* changes, from a
+ * machine range like "2026-09-01 to 2026-09-30" to the name people use.
+ */
+export function periodLabel(period: LeaderboardPeriod, now: number): string {
+  if (period === "all-time") return "All time";
+  const date = new Date(now);
+  if (period === "yearly") return String(date.getUTCFullYear());
+  return `${MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+/**
+ * Total minutes as the leaderboard shows it: a single number, no hour/minute
+ * split and no focus/break breakdown. The user asked for minutes, so minutes it
+ * is - the split is still stored and visible in the summary, just not ranked by.
+ */
+export function formatMinutes(milliseconds: number): string {
+  return `${Math.max(0, Math.round(milliseconds / 60_000))} min`;
+}

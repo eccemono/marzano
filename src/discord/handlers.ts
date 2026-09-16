@@ -1,9 +1,14 @@
-import { type ChatInputCommandInteraction, type Interaction, MessageFlags } from "discord.js";
+import {
+  type ChatInputCommandInteraction,
+  type Interaction,
+  type ModalSubmitInteraction,
+  MessageFlags,
+} from "discord.js";
 
-import { getChannelConfig } from "../db/config-repository";
+import { getChannelConfig, getGuildDefaults } from "../db/config-repository";
 import type { Db } from "../db/database";
 import { getActiveSession, saveActiveSession } from "../db/session-repository";
-import { BUILT_IN_DEFAULTS, resolveConfig } from "../domain/config";
+import { BUILT_IN_DEFAULTS, type PomodoroConfig, resolveConfig } from "../domain/config";
 import { SplitError, parseSplit } from "../domain/split";
 import {
   type TimerSession,
@@ -12,7 +17,16 @@ import {
   remainingMs,
   startSession,
 } from "../domain/timer";
-import { SPLIT_INPUT_ID, SPLIT_MODAL_ID, buildSplitModal } from "./modals";
+import {
+  CONFIG_INPUT_IDS,
+  CONFIGURE_MODAL_ID,
+  DEFAULT_MODAL_ID,
+  SPLIT_INPUT_ID,
+  SPLIT_MODAL_ID,
+  buildConfigModal,
+  buildSplitModal,
+  parseOnOff,
+} from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
 import { SESSION_SPLIT_MODAL_ID, authorizeControl } from "./session-controls";
@@ -35,7 +49,12 @@ import {
 } from "../commands/definitions";
 import { buildInfoEmbed, type InfoPayload } from "../commands/info";
 import { decideStart } from "../commands/start-decision";
-import { WizardError, applyChannelWizard, applyGuildDefaultsWizard } from "../commands/wizard";
+import {
+  WizardError,
+  type WizardInput,
+  applyChannelWizard,
+  applyGuildDefaultsWizard,
+} from "../commands/wizard";
 
 /**
  * The Discord-facing glue.
@@ -57,6 +76,16 @@ export interface HandlerDeps {
 
 function ephemeral(content: string): { content: string; flags: number } {
   return { content, flags: MessageFlags.Ephemeral as number };
+}
+
+/** One line describing a resolved configuration, used by every save path. */
+function describeConfig(config: PomodoroConfig): string {
+  return (
+    `focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ` +
+    `${config.longBreakMinutes}m, long break every ${config.cyclesBeforeLongBreak} focus ` +
+    `periods, sound ${config.soundEnabled ? "on" : "off"} at ${config.soundVolume}%, ` +
+    `auto-advance ${config.autoAdvance ? "on" : "off"}`
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -243,21 +272,41 @@ async function handleConfigure(
     return;
   }
 
+  const split = interaction.options.getString("split");
+  const cycles = interaction.options.getInteger("cycles");
+  const sound = interaction.options.getBoolean("sound");
+  const volume = interaction.options.getInteger("volume");
+  const auto = interaction.options.getBoolean("auto");
   const copyFrom = interaction.options.getChannel("copy_from");
+  const reset = interaction.options.getBoolean("reset") ?? false;
+
+  // Run with no options at all: open the menu rather than complaining.
+  if (
+    split === null &&
+    cycles === null &&
+    sound === null &&
+    volume === null &&
+    auto === null &&
+    copyFrom === null &&
+    !reset
+  ) {
+    const stored = getChannelConfig(deps.db, guildId, interaction.channelId);
+    await interaction.showModal(
+      buildConfigModal({
+        customId: CONFIGURE_MODAL_ID,
+        title: "Configure this channel",
+        initial: stored?.config ?? null,
+      }),
+    );
+    return;
+  }
 
   try {
     const result = applyChannelWizard(
       deps.db,
       guildId,
       interaction.channelId,
-      {
-        split: interaction.options.getString("split"),
-        cycles: interaction.options.getInteger("cycles"),
-        sound: interaction.options.getBoolean("sound"),
-        volume: interaction.options.getInteger("volume"),
-        copyFromChannelId: copyFrom?.id ?? null,
-        reset: interaction.options.getBoolean("reset") ?? false,
-      },
+      { split, cycles, sound, volume, auto, copyFromChannelId: copyFrom?.id ?? null, reset },
       interaction.user.id,
     );
 
@@ -266,11 +315,8 @@ async function handleConfigure(
       return;
     }
 
-    const config = result.config ?? BUILT_IN_DEFAULTS;
     await interaction.reply(
-      ephemeral(
-        `Saved: focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m, long break every ${config.cyclesBeforeLongBreak} focus periods, sound ${config.soundEnabled ? "on" : "off"} at ${config.soundVolume}%.`,
-      ),
+      ephemeral(`Saved: ${describeConfig(result.config ?? BUILT_IN_DEFAULTS)}.`),
     );
   } catch (error) {
     if (error instanceof SplitError || error instanceof WizardError) {
@@ -297,20 +343,35 @@ async function handleDefault(
     return;
   }
 
+  const split = interaction.options.getString("split");
+  const cycles = interaction.options.getInteger("cycles");
+  const sound = interaction.options.getBoolean("sound");
+  const volume = interaction.options.getInteger("volume");
+  const auto = interaction.options.getBoolean("auto");
+
+  if (split === null && cycles === null && sound === null && volume === null && auto === null) {
+    const stored = getGuildDefaults(deps.db, guildId);
+    await interaction.showModal(
+      buildConfigModal({
+        customId: DEFAULT_MODAL_ID,
+        title: "Server defaults",
+        initial: stored ?? null,
+      }),
+    );
+    return;
+  }
+
   try {
     const result = applyGuildDefaultsWizard(deps.db, guildId, {
-      split: interaction.options.getString("split"),
-      cycles: interaction.options.getInteger("cycles"),
-      sound: interaction.options.getBoolean("sound"),
-      volume: interaction.options.getInteger("volume"),
+      split,
+      cycles,
+      sound,
+      volume,
+      auto,
     });
 
     const config = result.config ?? BUILT_IN_DEFAULTS;
-    await interaction.reply(
-      ephemeral(
-        `Server defaults updated. Newly configured channels will start from focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m.`,
-      ),
-    );
+    await interaction.reply(ephemeral(`Server defaults updated: ${describeConfig(config)}.`));
   } catch (error) {
     if (error instanceof SplitError || error instanceof WizardError) {
       await interaction.reply(ephemeral(error.message));
@@ -443,8 +504,89 @@ async function handleSessionSplitModal(interaction: Interaction, deps: HandlerDe
   }
 }
 
+/** Read the shared config-modal fields into a wizard input, skipping empties. */
+function configInputFromModal(interaction: ModalSubmitInteraction): WizardInput {
+  const field = (id: string): string => interaction.fields.getTextInputValue(id) ?? "";
+
+  const input: WizardInput = {};
+
+  const splitText = field(CONFIG_INPUT_IDS.split).trim();
+  if (splitText) input.split = splitText;
+
+  const cycles = field(CONFIG_INPUT_IDS.cycles).trim();
+  if (cycles) input.cycles = Number(cycles);
+
+  const sound = parseOnOff(field(CONFIG_INPUT_IDS.sound));
+  if (sound !== null) input.sound = sound;
+
+  const volume = field(CONFIG_INPUT_IDS.volume).trim();
+  if (volume) input.volume = Number(volume);
+
+  const auto = parseOnOff(field(CONFIG_INPUT_IDS.auto));
+  if (auto !== null) input.auto = auto;
+
+  return input;
+}
+
+/** Apply a full configuration modal to the channel or the guild. */
+async function handleConfigModalSubmit(
+  interaction: ModalSubmitInteraction,
+  deps: HandlerDeps,
+  scope: "channel" | "guild",
+): Promise<void> {
+  const guildId = interaction.guildId;
+  if (!guildId) return;
+
+  const channelId = interaction.channelId;
+  if (!channelId) {
+    await interaction.reply(ephemeral("This command only works in a server channel."));
+    return;
+  }
+
+  const input = configInputFromModal(interaction);
+
+  try {
+    if (scope === "guild") {
+      const result = applyGuildDefaultsWizard(deps.db, guildId, input);
+      await interaction.reply(
+        ephemeral(
+          `Server defaults updated: ${describeConfig(result.config ?? BUILT_IN_DEFAULTS)}.`,
+        ),
+      );
+      return;
+    }
+
+    const result = applyChannelWizard(deps.db, guildId, channelId, input, interaction.user.id);
+
+    if (result.action === "reset") {
+      await interaction.reply(ephemeral("This channel's saved configuration was cleared."));
+      return;
+    }
+
+    await interaction.reply(
+      ephemeral(`Saved: ${describeConfig(result.config ?? BUILT_IN_DEFAULTS)}.`),
+    );
+  } catch (error) {
+    if (error instanceof SplitError || error instanceof WizardError) {
+      await interaction.reply(ephemeral(error.message));
+      return;
+    }
+    throw error;
+  }
+}
+
 async function handleModalSubmit(interaction: Interaction, deps: HandlerDeps): Promise<void> {
   if (!interaction.isModalSubmit()) return;
+
+  if (interaction.customId === CONFIGURE_MODAL_ID) {
+    await handleConfigModalSubmit(interaction, deps, "channel");
+    return;
+  }
+
+  if (interaction.customId === DEFAULT_MODAL_ID) {
+    await handleConfigModalSubmit(interaction, deps, "guild");
+    return;
+  }
 
   // Changing the split of a running session is a session-scoped action and
   // never writes to the channel's saved configuration.

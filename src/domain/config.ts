@@ -20,6 +20,14 @@ export interface PomodoroConfig {
   soundEnabled: boolean;
   /** 0-100. */
   soundVolume: number;
+  /**
+   * Whether a stage boundary advances on its own.
+   *
+   * False (the default) holds the session at the boundary and waits for someone
+   * to press Continue, so nobody misses the transition. True reproduces the
+   * original auto-forwarding behaviour.
+   */
+  autoAdvance: boolean;
 }
 
 export const CONFIG_LIMITS = {
@@ -36,6 +44,7 @@ export const BUILT_IN_DEFAULTS: PomodoroConfig = {
   cyclesBeforeLongBreak: 4,
   soundEnabled: true,
   soundVolume: 80,
+  autoAdvance: false,
 };
 
 export class ConfigValidationError extends Error {
@@ -116,6 +125,7 @@ export function resolveConfig(...layers: Array<PartialConfig | null | undefined>
       cyclesBeforeLongBreak: layer.cyclesBeforeLongBreak ?? merged.cyclesBeforeLongBreak,
       soundEnabled: layer.soundEnabled ?? merged.soundEnabled,
       soundVolume: layer.soundVolume ?? merged.soundVolume,
+      autoAdvance: layer.autoAdvance ?? merged.autoAdvance,
     };
   }
 

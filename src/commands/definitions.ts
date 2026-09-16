@@ -59,6 +59,12 @@ const CONFIGURE_OPTIONS = [
     max_value: 100,
   },
   {
+    type: ApplicationCommandOptionType.Boolean,
+    name: "auto",
+    description: "Advance to the next stage automatically (off = wait for Continue)",
+    required: false,
+  },
+  {
     type: ApplicationCommandOptionType.Channel,
     name: "copy_from",
     description: "Copy the saved configuration from another voice channel",
@@ -101,6 +107,12 @@ const DEFAULT_OPTIONS = [
     required: false,
     min_value: 0,
     max_value: 100,
+  },
+  {
+    type: ApplicationCommandOptionType.Boolean,
+    name: "auto",
+    description: "Advance to the next stage automatically (off = wait for Continue)",
+    required: false,
   },
 ] as const;
 
