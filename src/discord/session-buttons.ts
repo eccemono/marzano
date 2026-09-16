@@ -114,6 +114,17 @@ export async function handleSessionButton(
   interaction: ButtonInteraction,
   deps: SessionButtonDeps,
 ): Promise<void> {
+  // The Adjust panel's Cancel is not a session action - it dismisses the
+  // ephemeral panel it lives on and nothing else. Handled before the action map
+  // so it can never be confused with a control on the session itself.
+  if (interaction.customId === SESSION_BUTTON_IDS.modifyCancel) {
+    await interaction.deferUpdate();
+    await interaction.deleteReply().catch(() => {
+      // The panel is already gone; nothing to dismiss.
+    });
+    return;
+  }
+
   const guildId = interaction.guildId;
 
   const confirmation = parseConfirmationId(interaction.customId);
@@ -189,6 +200,15 @@ export async function handleSessionButton(
     return;
   }
 
+  // Acknowledge *before* the slow work, not after it.
+  //
+  // Stopping leaves the voice channel, closes the history run and repaints the
+  // message, and the render hits the Discord API. Answering the click only once
+  // all of that finished is what made Discord give up and surface "Marzano
+  // didn't respond in time" - the work was fine, it just exceeded the three
+  // second budget for the acknowledgement.
+  await interaction.deferUpdate();
+
   if (applied.remove) {
     // The supervisor owns stopping: it records the reason, cancels timers,
     // leaves the voice channel and frees the guild for a new session.
@@ -214,11 +234,6 @@ export async function handleSessionButton(
       saveActiveSession(deps.db, { ...applied.session, statusMessageId: rendered.messageId });
     }
   }
-
-  // Acknowledge silently. The status message is the visible result, so there is
-  // nothing to add - and a confirmed action clears its own "are you sure?"
-  // prompt instead of leaving it behind or replacing it with a second notice.
-  await interaction.deferUpdate();
 
   if (confirmation) {
     await interaction.deleteReply().catch(() => {

@@ -27,6 +27,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.19.2",
     "better-sqlite3": "^12.11.1",
     "discord.js": "^14.27.0",

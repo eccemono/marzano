@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { BUILT_IN_DEFAULTS } from "../src/domain/config";
+import { TOMATO_FACTS } from "../src/domain/facts";
 import { type TimerSession, pause, startSession, terminate } from "../src/domain/timer";
 import {
+  absoluteTimestamp,
   buildSessionEmbed,
   channelStatusText,
   cyclePosition,
   formatDuration,
   progressBar,
-  relativeTimestamp,
 } from "../src/discord/session-view";
 
 const T0 = 1_760_000_000_000;
@@ -20,6 +21,8 @@ function newSession(): TimerSession {
     voiceChannelId: "222222222222222222",
     config: BUILT_IN_DEFAULTS,
     now: T0,
+    // Fixed so the shuffled fact playlist is the same in every run.
+    factSeed: 42,
   });
 }
 
@@ -46,18 +49,19 @@ describe("formatDuration", () => {
 
 describe("progressBar", () => {
   it("is empty at the start and full at the end", () => {
-    expect(progressBar(0, 100, 10)).toBe("[----------]");
-    expect(progressBar(100, 100, 10)).toBe("[oooooooooo]");
+    expect(progressBar(0, 100, 10)).toBe("▒▒▒▒▒▒▒▒▒▒ 0%");
+    expect(progressBar(100, 100, 10)).toBe("██████████ 100%");
   });
 
-  it("fills with o rather than #", () => {
-    expect(progressBar(50, 100, 10)).toBe("[ooooo-----]");
+  it("fills with blocks and reports the percentage", () => {
+    expect(progressBar(50, 100, 10)).toBe("█████▒▒▒▒▒ 50%");
+    expect(progressBar(30, 100, 10)).toBe("███▒▒▒▒▒▒▒ 30%");
   });
 
   it("clamps out-of-range input and tolerates a zero duration", () => {
-    expect(progressBar(500, 100, 10)).toBe("[oooooooooo]");
-    expect(progressBar(-5, 100, 10)).toBe("[----------]");
-    expect(progressBar(10, 0, 10)).toBe("[----------]");
+    expect(progressBar(500, 100, 10)).toBe("██████████ 100%");
+    expect(progressBar(-5, 100, 10)).toBe("▒▒▒▒▒▒▒▒▒▒ 0%");
+    expect(progressBar(10, 0, 10)).toBe("▒▒▒▒▒▒▒▒▒▒ 0%");
   });
 });
 
@@ -116,15 +120,15 @@ describe("cyclePosition", () => {
   });
 });
 
-describe("relativeTimestamp", () => {
-  it("renders a Discord relative timestamp in whole seconds", () => {
-    // Discord renders this in each client and keeps it current itself, which is
-    // what makes the countdown smooth without us editing every few seconds.
-    expect(relativeTimestamp(1_760_000_000_000)).toBe("<t:1760000000:R>");
+describe("absoluteTimestamp", () => {
+  it("renders a Discord clock-time timestamp in whole seconds", () => {
+    // The short-time style, not the relative one: the message should say when
+    // the stage ends, not how long is left.
+    expect(absoluteTimestamp(1_760_000_000_000)).toBe("<t:1760000000:t>");
   });
 
-  it("rounds down, so the countdown never shows a second that has not passed", () => {
-    expect(relativeTimestamp(1_760_000_000_999)).toBe("<t:1760000000:R>");
+  it("rounds down, so it never names a second that has not arrived", () => {
+    expect(absoluteTimestamp(1_760_000_000_999)).toBe("<t:1760000000:t>");
   });
 });
 
@@ -170,10 +174,12 @@ describe("buildSessionEmbed", () => {
     expect(longBreak.title).toContain("Long break");
   });
 
-  it("shows a client-rendered countdown to the stage deadline", () => {
+  it("says when the stage ends, not how long is left", () => {
     const embed = buildSessionEmbed({ session: newSession(), now: T0 + 10 * MINUTE });
 
-    expect(embed.description).toContain("<t:1760001500:R>");
+    expect(embed.description).toContain("Ends in <t:1760001500:t>");
+    // The relative form ("in 15 minutes") is deliberately gone.
+    expect(embed.description).not.toContain(":R>");
   });
 
   it("does not carry the old auto-refresh footer", () => {
@@ -194,19 +200,40 @@ describe("buildSessionEmbed", () => {
     expect(embed.description).not.toContain("<t:");
   });
 
-  it("reports the split, cycle, sound state and voice channel", () => {
+  it("reports the split and the cycle position", () => {
     const session = newSession();
 
     expect(fieldValue(session, T0, "Split")).toBe("25/5/15");
     expect(fieldValue(session, T0, "Cycle")).toBe("1/4");
-    expect(fieldValue(session, T0, "Sound")).toBe("on (80%)");
-    expect(fieldValue(session, T0, "Voice channel")).toBe("<#222222222222222222>");
   });
 
-  it("reflects sound being turned off", () => {
-    const session = { ...newSession(), config: { ...BUILT_IN_DEFAULTS, soundEnabled: false } };
+  it("leaves out settings that the status message does not need", () => {
+    const session = newSession();
 
-    expect(fieldValue(session, T0, "Sound")).toBe("off");
+    // Sound and the voice channel were on every embed but told the reader
+    // nothing they could not already see, so they are gone.
+    expect(fieldValue(session, T0, "Sound")).toBeUndefined();
+    expect(fieldValue(session, T0, "Voice channel")).toBeUndefined();
+  });
+
+  it("shows a tomato fact on breaks, and none during focus", () => {
+    const focus = newSession();
+    expect(fieldValue(focus, T0, "\u{1F345} Tomato fact")).toBeUndefined();
+
+    const shortBreak = { ...focus, stage: "short_break" as const, completedFocusStages: 1 };
+    const fact = fieldValue(shortBreak, T0, "\u{1F345} Tomato fact");
+
+    expect(typeof fact).toBe("string");
+    expect(TOMATO_FACTS).toContain(fact);
+  });
+
+  it("gives consecutive breaks different facts", () => {
+    const first = { ...newSession(), stage: "short_break" as const, completedFocusStages: 1 };
+    const second = { ...first, completedFocusStages: 2 };
+
+    expect(fieldValue(first, T0, "\u{1F345} Tomato fact")).not.toBe(
+      fieldValue(second, T0, "\u{1F345} Tomato fact"),
+    );
   });
 
   it("renders a stopped session without claiming time remains", () => {

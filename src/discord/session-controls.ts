@@ -22,6 +22,7 @@ export const SESSION_BUTTON_IDS = {
   skip: "marzano:session:skip",
   stop: "marzano:session:stop",
   modify: "marzano:session:modify",
+  modifyCancel: "marzano:session:modify-cancel",
   extend2: "marzano:session:extend2",
   extend5: "marzano:session:extend5",
   changeSplit: "marzano:session:split",
@@ -45,8 +46,15 @@ export type SessionAction =
   | "change_split"
   | "toggle_sound";
 
-/** Actions that discard work in progress, so they ask first. */
-export const DESTRUCTIVE_ACTIONS: readonly SessionAction[] = ["stop"];
+/**
+ * Actions that ask before acting.
+ *
+ * Empty on purpose: stopping now takes effect on the first click. The prompt was
+ * an extra tap on the button people press when they have already decided, and
+ * the status message makes the result of a stop obvious enough to undo by
+ * starting again.
+ */
+export const DESTRUCTIVE_ACTIONS: readonly SessionAction[] = [];
 
 const ACTION_LABELS: Record<SessionAction, string> = {
   pause: "Pause",

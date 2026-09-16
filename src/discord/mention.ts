@@ -74,10 +74,9 @@ export async function handleMention(
   });
 
   if (outcome.kind === "started") {
-    await message.reply({
-      content: `Starting a Pomodoro session in <#${voiceChannelId}>. Controls are in that channel.`,
-      allowedMentions: { repliedUser: false },
-    });
+    // No reply: the status message is already posted in this channel, and a
+    // "starting a session" line above it would just be a second copy of the
+    // same fact. The mention did its job by summoning the window.
     return outcome;
   }
 

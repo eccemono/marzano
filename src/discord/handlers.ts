@@ -3,6 +3,7 @@ import {
   type Interaction,
   type ModalSubmitInteraction,
   MessageFlags,
+  PermissionFlagsBits,
 } from "discord.js";
 
 import { getChannelConfig, getGuildDefaults } from "../db/config-repository";
@@ -35,6 +36,14 @@ import { leaderboardTotals } from "../db/history-repository";
 import { periodBounds, type LeaderboardPeriod } from "../domain/attendance";
 import type { SessionRendererPort } from "./session-renderer";
 import type { SessionSupervisor } from "../session/supervisor";
+import type { SessionVoice } from "../voice/manager";
+import { BELL, type SoundLibrary } from "../voice/sounds";
+import {
+  PLAYBACK_STRATEGIES,
+  STRATEGY_HELP,
+  type PlaybackStrategy,
+  type TestStrategy,
+} from "../voice/diagnostics";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import {
@@ -45,6 +54,7 @@ import {
   PERIODS,
   STATUS_COMMAND,
   STOP_COMMAND,
+  TEST_COMMAND,
   isStartCommand,
 } from "../commands/definitions";
 import { buildInfoEmbed, type InfoPayload } from "../commands/info";
@@ -72,6 +82,14 @@ export interface HandlerDeps {
   gatewayLatencyMs(): number;
   guildCount(): number;
   applicationId(): string;
+  /**
+   * TEMPORARY: voice access for the `/test` audio diagnostic.
+   *
+   * Optional so nothing else has to know about the command; the handler reports
+   * that diagnostics are unavailable rather than failing.
+   */
+  voice?: SessionVoice;
+  sounds?: SoundLibrary;
 }
 
 function ephemeral(content: string): { content: string; flags: number } {
@@ -149,7 +167,21 @@ export interface StartRequest {
   splitInput: string | null;
 }
 
-export async function startFrom(deps: HandlerDeps, request: StartRequest): Promise<StartOutcome> {
+/**
+ * The fast half of starting: precedence, permissions and configuration.
+ *
+ * Separated from the work that follows because an interaction must be answered
+ * within three seconds, while posting the status message and joining a voice
+ * channel have no such budget. Deciding first lets the handler answer - or open
+ * the setup modal, which is only possible as an interaction's first response -
+ * before it does anything slow.
+ */
+export type StartPlan =
+  | { kind: "reject"; message: string }
+  | { kind: "open-setup"; reason: "unconfigured" | "invalid-split" }
+  | { kind: "ready"; config: ReturnType<typeof resolveConfig> };
+
+export function planStart(deps: HandlerDeps, request: StartRequest): StartPlan {
   const { guildId, textChannelId, voiceChannelId } = request;
 
   const stored = getChannelConfig(deps.db, guildId, voiceChannelId);
@@ -167,30 +199,49 @@ export async function startFrom(deps: HandlerDeps, request: StartRequest): Promi
   if (decision.kind === "reject") return { kind: "reject", message: decision.message };
   if (decision.kind === "open-setup") return { kind: "open-setup", reason: decision.reason };
 
-  const config = resolveConfig(decision.split ?? undefined, stored?.config ?? undefined);
+  return {
+    kind: "ready",
+    config: resolveConfig(decision.split ?? undefined, stored?.config ?? undefined),
+  };
+}
 
+/**
+ * The slow half: create the session, post its status message and adopt it.
+ *
+ * The supervisor then takes over - it persists, schedules the first stage wake
+ * and plays the cue - so no caller has to know the order those must happen in.
+ */
+export async function beginStart(
+  deps: HandlerDeps,
+  request: StartRequest,
+  config: ReturnType<typeof resolveConfig>,
+): Promise<Extract<StartOutcome, { kind: "started" }>> {
   const session = startSession({
-    guildId,
-    voiceChannelId,
-    textChannelId,
+    guildId: request.guildId,
+    voiceChannelId: request.voiceChannelId,
+    textChannelId: request.textChannelId,
     config,
     now: Date.now(),
   });
   saveActiveSession(deps.db, session);
 
   // Post the canonical status message and remember its id, so later refreshes
-  // edit this one instead of posting duplicates. The supervisor then adopts the
-  // session: it persists, schedules the first stage wake, and plays the cue.
+  // edit this one instead of posting duplicates.
   const rendered = await deps.presenter.render(session);
   const started = { ...session, statusMessageId: rendered.messageId };
   await deps.supervisor.begin(started);
 
-  return { kind: "started", channelId: voiceChannelId, config, session: started };
+  return { kind: "started", channelId: request.voiceChannelId, config, session: started };
 }
 
-/** A one-line description of the split that a session is running. */
-export function describeSplit(config: ReturnType<typeof resolveConfig>): string {
-  return `focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m`;
+/** Decision plus work, for callers with no interaction deadline to respect. */
+export async function startFrom(deps: HandlerDeps, request: StartRequest): Promise<StartOutcome> {
+  const plan = planStart(deps, request);
+
+  if (plan.kind === "reject") return { kind: "reject", message: plan.message };
+  if (plan.kind === "open-setup") return { kind: "open-setup", reason: plan.reason };
+
+  return beginStart(deps, request, plan.config);
 }
 
 async function handleStart(
@@ -203,29 +254,39 @@ async function handleStart(
     return;
   }
 
-  const outcome = await startFrom(deps, {
+  const request: StartRequest = {
     guildId,
     textChannelId: interaction.channelId,
     voiceChannelId: interaction.channelId,
     splitInput: interaction.options.getString("split"),
-  });
+  };
 
-  if (outcome.kind === "reject") {
-    await interaction.reply(ephemeral(outcome.message));
+  // Decide before answering: the refusal and the setup modal are both responses
+  // that cannot be sent after a deferral, and neither needs any slow work.
+  const plan = planStart(deps, request);
+
+  if (plan.kind === "reject") {
+    await interaction.reply(ephemeral(plan.message));
     return;
   }
 
-  if (outcome.kind === "open-setup") {
+  if (plan.kind === "open-setup") {
     const modal = buildSplitModal({
-      title: outcome.reason === "unconfigured" ? "Set up this channel" : "Check the split",
+      title: plan.reason === "unconfigured" ? "Set up this channel" : "Check the split",
     }).setCustomId(`${SPLIT_MODAL_ID}:${interaction.channelId}`);
     await interaction.showModal(modal);
     return;
   }
 
-  await interaction.reply(
-    ephemeral(`Session started - ${describeSplit(outcome.config)}. Controls are in the channel.`),
-  );
+  // Then acknowledge silently and get out of the way. The posted status message
+  // is the thing the user asked for, so there is nothing left to say - and
+  // replying only once the render and the voice join had finished is what risked
+  // falling past the three-second deadline.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await beginStart(deps, request, plan.config);
+  await interaction.deleteReply().catch(() => {
+    // Already gone; nothing to clean up.
+  });
 }
 
 async function handleStatus(
@@ -404,12 +465,14 @@ async function handleStop(
     return;
   }
 
-  // Stop through the supervisor. Writing the row directly left the stage timer
-  // armed and the bot sitting in the voice channel: the session looked stopped
-  // in the database while it was still running in Discord.
+  // Acknowledge before the slow teardown. Stop through the supervisor: writing
+  // the row directly left the stage timer armed and the bot sitting in the voice
+  // channel - the session looked stopped in the database while it still ran in
+  // Discord. That teardown can exceed the three-second interaction budget, so the
+  // click is answered first.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await deps.supervisor.stop(guildId, `stopped by ${interaction.user.id}`);
-
-  await interaction.reply(ephemeral(`Stopped the session in <#${session.voiceChannelId}>.`));
+  await interaction.editReply(`Stopped the session in <#${session.voiceChannelId}>.`);
 }
 
 async function handleLeaderboard(
@@ -440,6 +503,98 @@ async function handleLeaderboard(
       }),
     ],
   });
+}
+
+/**
+ * TEMPORARY: report what the voice path is actually doing.
+ *
+ * Encoding and the cue assets have both been verified independently, so the
+ * remaining question is which playback path is audible. Each strategy is timed:
+ * a cue that really plays takes about as long as the audio lasts, while one the
+ * pipeline swallows immediately reports a few milliseconds.
+ */
+function botPermissions(
+  interaction: ChatInputCommandInteraction,
+  deps: HandlerDeps,
+  channelId: string,
+): string {
+  const channel = interaction.guild?.channels.cache.get(channelId);
+  if (!channel) return "unknown (channel not cached)";
+
+  const permissions = channel.permissionsFor(deps.applicationId());
+  if (!permissions) return "unknown (no permission object)";
+
+  return `Connect=${permissions.has(PermissionFlagsBits.Connect)} Speak=${permissions.has(
+    PermissionFlagsBits.Speak,
+  )}`;
+}
+
+async function handleTest(
+  interaction: ChatInputCommandInteraction,
+  deps: HandlerDeps,
+): Promise<void> {
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply(ephemeral("Marzano only works inside a server."));
+    return;
+  }
+
+  if (!deps.voice) {
+    await interaction.reply(ephemeral("Voice diagnostics are not wired up in this build."));
+    return;
+  }
+
+  const voiceChannelId = callerVoiceChannelId(interaction);
+  if (!voiceChannelId) {
+    await interaction.reply(ephemeral("Join a voice channel first, then run /test again."));
+    return;
+  }
+
+  const requested = interaction.options.getString("strategy") ?? "diag";
+  const strategy: TestStrategy = (["diag", ...PLAYBACK_STRATEGIES] as string[]).includes(requested)
+    ? (requested as TestStrategy)
+    : "diag";
+
+  // Several seconds of audio: defer so the interaction is answered in time.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const lines: string[] = [];
+  lines.push(`channel: <#${voiceChannelId}>`);
+  lines.push(`bot perms: ${botPermissions(interaction, deps, voiceChannelId)}`);
+  lines.push(`voice connection: ${deps.voice.isConnected(guildId) ? "ready" : "none"}`);
+
+  const bellFrames = deps.sounds?.frames(BELL, 80)?.length;
+  lines.push(`bell frames at 80%: ${bellFrames ?? "unavailable"}`);
+
+  const strategies: readonly PlaybackStrategy[] =
+    strategy === "diag" ? PLAYBACK_STRATEGIES : [strategy];
+
+  const session = {
+    guildId,
+    voiceChannelId,
+    config: { soundEnabled: true, soundVolume: 100 },
+  };
+
+  for (const candidate of strategies) {
+    lines.push(`— ${candidate}: ${STRATEGY_HELP[candidate]}`);
+    const report = await deps.voice.playTest(session, candidate);
+    lines.push(
+      [
+        `  played=${report.played}`,
+        `elapsed=${report.elapsedMs}ms`,
+        `frames=${report.frames}`,
+        `bytes=${report.bytes}`,
+        `states=${report.states.join(" -> ") || "none"}`,
+        report.reason ? `reason=${report.reason}` : "",
+      ]
+        .filter(Boolean)
+        .join("  "),
+    );
+  }
+
+  lines.push(`connection after: ${deps.voice.isConnected(guildId) ? "ready" : "none"}`);
+
+  await interaction.editReply(lines.join("\n"));
 }
 
 /**
@@ -683,6 +838,12 @@ export async function handleInteraction(
 
   if (command === LEADERBOARD_COMMAND.name) {
     await handleLeaderboard(interaction, deps);
+    return;
+  }
+
+  // TEMPORARY: audio diagnosis, removed once cue playback is known-good.
+  if (command === TEST_COMMAND.name) {
+    await handleTest(interaction, deps);
     return;
   }
 }

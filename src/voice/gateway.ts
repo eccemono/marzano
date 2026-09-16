@@ -34,9 +34,35 @@ import type { Client } from "discord.js";
 
 import type { Logger } from "../logger";
 
+import {
+  type PlaybackStrategy,
+  encodeNativeFrames,
+  encodePortableFrames,
+  opusStreamFromFrames,
+  pcmStreamFromSamples,
+  renderTestBell,
+  sumBytes,
+} from "./diagnostics";
 import type { SoundLibrary, SoundName } from "./sounds";
 
 export type PlaybackResult = { played: true } | { played: false; reason: string };
+
+/**
+ * TEMPORARY: what a diagnostic playback actually did.
+ *
+ * `elapsedMs` is the important field. A cue that really played takes about as
+ * long as the audio is long; a stream that is consumed instantly reports a few
+ * milliseconds, which is the signature of the audio never leaving the process.
+ */
+export interface TestPlaybackReport {
+  played: boolean;
+  reason: string | null;
+  elapsedMs: number;
+  /** Every player state transition, in order. */
+  states: string[];
+  frames: number;
+  bytes: number;
+}
 
 export interface VoiceGateway {
   /** Join a voice channel and wait until the connection is usable. */
@@ -56,6 +82,8 @@ export interface VoiceGateway {
   play(guildId: string, sound: SoundName, volumePercent: number): Promise<PlaybackResult>;
   /** Mute and deafen the bot (`true`), or undo both (`false`). */
   setSilenced(guildId: string, silenced: boolean): Promise<void>;
+  /** TEMPORARY: play a cue through one selectable audio path, with timing. */
+  testPlayback?(guildId: string, strategy: PlaybackStrategy): Promise<TestPlaybackReport>;
 }
 
 const READY_TIMEOUT_MS = 15_000;
@@ -262,6 +290,82 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
           reason: describe(error),
         });
       }
+    },
+
+    async testPlayback(guildId: string, strategy: PlaybackStrategy): Promise<TestPlaybackReport> {
+      const entry = voices.get(guildId);
+      if (!entry || entry.connection.state.status !== VoiceConnectionStatus.Ready) {
+        return {
+          played: false,
+          reason: "not connected to a voice channel",
+          elapsedMs: 0,
+          states: [],
+          frames: 0,
+          bytes: 0,
+        };
+      }
+
+      const samples = renderTestBell();
+      let resource: ReturnType<typeof createAudioResource>;
+      let frames = 0;
+      let bytes = 0;
+
+      try {
+        if (strategy === "pcm") {
+          // Raw PCM must be interleaved stereo; the pipeline encodes it itself.
+          bytes = samples.length * 4;
+          resource = createAudioResource(pcmStreamFromSamples(samples), {
+            inputType: StreamType.Raw,
+          });
+        } else {
+          const encoded =
+            strategy === "native" ? encodeNativeFrames(samples) : encodePortableFrames(samples);
+          frames = encoded.length;
+          bytes = sumBytes(encoded);
+          resource = createAudioResource(opusStreamFromFrames(encoded), {
+            inputType: StreamType.Opus,
+          });
+        }
+      } catch (error) {
+        return {
+          played: false,
+          reason: describe(error),
+          elapsedMs: 0,
+          states: [],
+          frames,
+          bytes,
+        };
+      }
+
+      // Watching the transitions is half the diagnosis: a resource that plays
+      // for real sits in Playing for the length of the cue, while one that is
+      // consumed instantly or never starts goes straight back to Idle.
+      const states: string[] = [];
+      const onStateChange = (oldState: { status: string }, newState: { status: string }): void => {
+        states.push(`${oldState.status}->${newState.status}`);
+      };
+      entry.player.on("stateChange", onStateChange);
+
+      const started = Date.now();
+      let played = false;
+      let reason: string | null = null;
+
+      try {
+        entry.player.play(resource);
+        await entersState(entry.player, AudioPlayerStatus.Idle, PLAY_TIMEOUT_MS);
+        played = true;
+      } catch (error) {
+        reason = describe(error);
+        try {
+          entry.player.stop(true);
+        } catch {
+          // Best effort; the reason above is the useful signal.
+        }
+      } finally {
+        entry.player.off("stateChange", onStateChange);
+      }
+
+      return { played, reason, elapsedMs: Date.now() - started, states, frames, bytes };
     },
   };
 }

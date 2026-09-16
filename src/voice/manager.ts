@@ -18,7 +18,8 @@
 
 import type { Logger } from "../logger";
 
-import type { VoiceGateway } from "./gateway";
+import type { PlaybackStrategy } from "./diagnostics";
+import type { TestPlaybackReport, VoiceGateway } from "./gateway";
 import { BELL, START_CUE, type SoundName } from "./sounds";
 
 /** The subset of a session this layer needs. */
@@ -94,6 +95,43 @@ export class SessionVoice {
    */
   async announceTransition(session: VoiceSession): Promise<void> {
     await this.announce(session, false);
+  }
+
+  /**
+   * TEMPORARY: join and play a cue through one selectable audio path.
+   *
+   * Used only by `/test` while the silent-cue cause is being found; it is
+   * removed along with that command.
+   */
+  async playTest(session: VoiceSession, strategy: PlaybackStrategy): Promise<TestPlaybackReport> {
+    if (!(await this.join(session))) {
+      return {
+        played: false,
+        reason: "could not join the voice channel",
+        elapsedMs: 0,
+        states: [],
+        frames: 0,
+        bytes: 0,
+      };
+    }
+
+    if (!this.gateway.testPlayback) {
+      return {
+        played: false,
+        reason: "this voice gateway has no diagnostic playback",
+        elapsedMs: 0,
+        states: [],
+        frames: 0,
+        bytes: 0,
+      };
+    }
+
+    return this.gateway.testPlayback(session.guildId, strategy);
+  }
+
+  /** Whether this guild currently has a usable connection. */
+  isConnected(guildId: string): boolean {
+    return this.gateway.isConnected(guildId);
   }
 
   /** Leave one guild's voice channel and forget the connection. */

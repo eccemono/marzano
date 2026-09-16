@@ -13,6 +13,7 @@
  */
 
 import { type PomodoroConfig, applySplit } from "./config";
+import { newFactSeed } from "./facts";
 import type { Split } from "./split";
 
 export const SESSION_STAGES = ["focus", "short_break", "long_break"] as const;
@@ -41,6 +42,13 @@ export interface TimerSession {
   awaitingContinue: boolean;
   /** Focus stages finished since the session began. */
   completedFocusStages: number;
+  /**
+   * Seed for this session's shuffled tomato-fact playlist.
+   *
+   * Fixed at start so the sequence is stable across restarts and renders, while
+   * differing between sessions.
+   */
+  factSeed: number;
   config: PomodoroConfig;
   stopReason: string | null;
 }
@@ -83,6 +91,8 @@ export interface StartOptions {
   statusMessageId?: string | null;
   config: PomodoroConfig;
   now: number;
+  /** Overrides the shuffled fact playlist's seed. Injected by tests. */
+  factSeed?: number;
 }
 
 /** Begin a session in a fresh focus stage. */
@@ -101,6 +111,7 @@ export function startSession(options: StartOptions): TimerSession {
     pausedRemainingMs: null,
     awaitingContinue: false,
     completedFocusStages: 0,
+    factSeed: options.factSeed ?? newFactSeed(),
     config,
     stopReason: null,
   };

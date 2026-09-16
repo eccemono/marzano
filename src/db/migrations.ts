@@ -167,6 +167,15 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "break facts: per-session fact playlist seed",
+    up(db) {
+      // Existing rows fall back to seed 0, which is still a deterministic
+      // playlist - a session in flight during the upgrade simply keeps working.
+      db.exec("ALTER TABLE active_sessions ADD COLUMN fact_seed INTEGER NOT NULL DEFAULT 0;");
+    },
+  },
 ];
 
 const CREATE_MIGRATION_TABLE = `

@@ -45,6 +45,7 @@ interface ActiveSessionRow {
   sound_volume: number;
   auto_advance: number;
   awaiting_continue: number;
+  fact_seed: number;
   stop_reason: string | null;
   updated_at: string;
 }
@@ -72,6 +73,7 @@ function rowToRecord(row: ActiveSessionRow): ActiveSessionRecord {
     pausedRemainingMs: row.paused_remaining_ms,
     awaitingContinue: row.awaiting_continue === 1,
     completedFocusStages: row.completed_focus_stages,
+    factSeed: row.fact_seed,
     config: {
       focusMinutes: row.focus_minutes,
       shortBreakMinutes: row.short_break_minutes,
@@ -110,13 +112,13 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
        stage, state, stage_started_at, stage_ends_at, paused_remaining_ms,
        completed_focus_stages, focus_minutes, short_break_minutes, long_break_minutes,
        cycles_before_long_break, sound_enabled, sound_volume, auto_advance,
-       awaiting_continue, stop_reason, updated_at
+       awaiting_continue, fact_seed, stop_reason, updated_at
      ) VALUES (
        @guild_id, @voice_channel_id, @text_channel_id, @status_message_id,
        @stage, @state, @stage_started_at, @stage_ends_at, @paused_remaining_ms,
        @completed_focus_stages, @focus_minutes, @short_break_minutes, @long_break_minutes,
        @cycles_before_long_break, @sound_enabled, @sound_volume, @auto_advance,
-       @awaiting_continue, @stop_reason, @updated_at
+       @awaiting_continue, @fact_seed, @stop_reason, @updated_at
      )
      ON CONFLICT (guild_id) DO UPDATE SET
        voice_channel_id         = excluded.voice_channel_id,
@@ -136,6 +138,7 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
        sound_volume             = excluded.sound_volume,
        auto_advance             = excluded.auto_advance,
        awaiting_continue        = excluded.awaiting_continue,
+       fact_seed                = excluded.fact_seed,
        stop_reason              = excluded.stop_reason,
        updated_at               = excluded.updated_at`,
   ).run({
@@ -150,6 +153,7 @@ export function saveActiveSession(db: Db, record: ActiveSessionRecord): void {
     paused_remaining_ms: record.pausedRemainingMs,
     awaiting_continue: record.awaitingContinue ? 1 : 0,
     completed_focus_stages: record.completedFocusStages,
+    fact_seed: record.factSeed,
     focus_minutes: record.config.focusMinutes,
     short_break_minutes: record.config.shortBreakMinutes,
     long_break_minutes: record.config.longBreakMinutes,

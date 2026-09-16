@@ -71,6 +71,10 @@ export function buildModifyComponents(): ActionRowBuilder<ButtonBuilder>[] {
       .setCustomId(SESSION_BUTTON_IDS.toggleSound)
       .setLabel("Sound on/off")
       .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(SESSION_BUTTON_IDS.modifyCancel)
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Danger),
   );
 
   return [row];

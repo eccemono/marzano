@@ -52,6 +52,15 @@ function stopInteraction() {
       getBoolean: () => null,
       getChannel: () => null,
     },
+    /** Whether the interaction has been acknowledged yet. */
+    deferred: false,
+    async deferReply() {
+      this.deferred = true;
+      return undefined;
+    },
+    async editReply() {
+      return undefined;
+    },
     async reply() {
       return undefined;
     },
@@ -219,5 +228,35 @@ describe("the slash stop command", () => {
     expect(supervisor.isScheduled(GUILD)).toBe(false);
     expect(presenter.watching.has(GUILD)).toBe(false);
     expect(voice.leaves).toBeGreaterThan(0);
+  });
+
+  it("acknowledges the click before the teardown, so it cannot time out", async () => {
+    // The teardown leaves the voice channel, closes the history run and rewrites
+    // the message. Running that before answering is what made Discord give up and
+    // report "Marzano didn't respond in time", so the acknowledgement has to come
+    // first.
+    const { db, supervisor, presenter } = setup();
+    await supervisor.begin(newSession());
+
+    const interaction = stopInteraction();
+    const stop = supervisor.stop.bind(supervisor);
+    let deferredWhenTornDown: boolean | null = null;
+
+    supervisor.stop = async (guildId: string, reason: string) => {
+      deferredWhenTornDown = interaction.deferred;
+      return stop(guildId, reason);
+    };
+
+    await handleInteraction(interaction as never, {
+      db,
+      presenter,
+      supervisor,
+      uptimeSeconds: () => 0,
+      gatewayLatencyMs: () => 0,
+      guildCount: () => 1,
+      applicationId: () => "application-id",
+    });
+
+    expect(deferredWhenTornDown).toBe(true);
   });
 });

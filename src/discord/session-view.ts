@@ -1,5 +1,6 @@
 import type { TimerSession } from "../domain/timer";
 import { elapsedMs, isPaused, remainingMs, stageDurationMs } from "../domain/timer";
+import { factForBreak } from "../domain/facts";
 
 /**
  * The session status message.
@@ -11,10 +12,10 @@ import { elapsedMs, isPaused, remainingMs, stageDurationMs } from "../domain/tim
  * here accumulates, so re-rendering is idempotent and a missed refresh simply
  * shows a slightly stale number rather than a wrong one.
  *
- * The countdown is a Discord relative timestamp rather than a number we
- * recompute. Discord renders `<t:...:R>` in each client and keeps it current on
- * its own, so the countdown stays smooth without the bot editing the message
- * every few seconds - fewer API calls, no rate limits, and nothing to drift.
+ * The countdown is a Discord timestamp rather than a number we recompute.
+ * Discord renders `<t:...:t>` in each client as the reader's own local clock
+ * time, so the message says when the stage ends with no bot edits every few
+ * seconds - fewer API calls, no rate limits, and nothing to drift.
  */
 
 export interface SessionEmbedField {
@@ -54,24 +55,24 @@ export function formatDuration(milliseconds: number): string {
   return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }
 
-/** Progress bar such as `[ooooo-----]`. */
+/** Progress bar such as `█████▒▒▒▒▒ 50%`. */
 export function progressBar(elapsed: number, duration: number, width = 10): string {
-  if (duration <= 0) return `[${"-".repeat(width)}]`;
-
-  const ratio = Math.min(1, Math.max(0, elapsed / duration));
+  const ratio = duration <= 0 ? 0 : Math.min(1, Math.max(0, elapsed / duration));
   const filled = Math.round(ratio * width);
 
-  return `[${"o".repeat(filled)}${"-".repeat(width - filled)}]`;
+  return `${"\u2588".repeat(filled)}${"\u2592".repeat(width - filled)} ${Math.round(ratio * 100)}%`;
 }
 
 /**
- * Discord's client-rendered countdown for a deadline.
+ * Discord's client-rendered clock time for a deadline.
  *
- * `R` is the relative style: each client shows "in 24 minutes" and keeps it
- * updated itself.
+ * `t` is the short-time style: each client shows the reader's own local time,
+ * so the message says when the stage ends rather than how long is left. A
+ * relative countdown ("in 24 minutes") reads the same at a glance but never
+ * tells you whether that lands at 3:42 or 4:42.
  */
-export function relativeTimestamp(instant: number): string {
-  return `<t:${Math.floor(instant / 1_000)}:R>`;
+export function absoluteTimestamp(instant: number): string {
+  return `<t:${Math.floor(instant / 1_000)}:t>`;
 }
 
 /**
@@ -142,20 +143,27 @@ export function buildSessionEmbed(input: SessionEmbedInput): SessionEmbed {
   const countdown =
     paused || deadline === null
       ? `Paused with ${formatDuration(remaining)} left in this stage.`
-      : `# ${relativeTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
+      : `# Ends in ${absoluteTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
+
+  const fields: SessionEmbedField[] = [
+    { name: "Cycle", value: cyclePosition(session), inline: true },
+    { name: "Split", value: split, inline: true },
+  ];
+
+  // Breaks carry one fact, taken from this session's own shuffled playlist, so
+  // the same break never shows two different facts as the message refreshes and
+  // no fact repeats within the session.
+  if (session.stage !== "focus") {
+    fields.push({
+      name: "\u{1F345} Tomato fact",
+      value: factForBreak(session.factSeed, session.completedFocusStages),
+      inline: false,
+    });
+  }
 
   return {
     title: `${STAGE_ICONS[session.stage]} ${STAGE_LABELS[session.stage]}${stateLabel}`,
     description: countdown,
-    fields: [
-      { name: "Cycle", value: cyclePosition(session), inline: true },
-      { name: "Split", value: split, inline: true },
-      {
-        name: "Sound",
-        value: session.config.soundEnabled ? `on (${session.config.soundVolume}%)` : "off",
-        inline: true,
-      },
-      { name: "Voice channel", value: `<#${session.voiceChannelId}>`, inline: false },
-    ],
+    fields,
   };
 }

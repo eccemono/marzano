@@ -208,6 +208,9 @@ async function main(): Promise<void> {
           gatewayLatencyMs: () => client.ws.ping,
           guildCount: () => client.guilds.cache.size,
           applicationId: () => client.application?.id ?? config.clientId,
+          // TEMPORARY: only the /test audio diagnostic uses these.
+          voice,
+          sounds,
         },
         botUserId: () => client.user?.id ?? null,
         logger: logger.child({ component: "mention" }),

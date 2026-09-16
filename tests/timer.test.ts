@@ -34,6 +34,9 @@ function start(now = T0, config: PomodoroConfig = CONFIG) {
     voiceChannelId: "222222222222222222",
     config,
     now,
+    // Fixed so two sessions started in a test are equal in every field; the
+    // real seed is random per session.
+    factSeed: 7,
   });
 }
 
