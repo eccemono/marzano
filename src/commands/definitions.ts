@@ -104,45 +104,61 @@ const DEFAULT_OPTIONS = [
   },
 ] as const;
 
-export const POMODORO_COMMAND = {
-  name: "pomodoro",
-  description: "Run a shared Pomodoro cycle in this voice channel",
-  options: [
-    {
-      type: ApplicationCommandOptionType.Subcommand,
-      name: "start",
-      description: "Start a focus cycle in this voice channel",
-      options: [SPLIT_OPTION],
-    },
-    {
-      type: ApplicationCommandOptionType.Subcommand,
-      name: "status",
-      description: "Show the stage, cycle and remaining time",
-    },
-    {
-      type: ApplicationCommandOptionType.Subcommand,
-      name: "configure",
-      description: "Change this channel's saved configuration",
-      options: CONFIGURE_OPTIONS,
-    },
-    {
-      type: ApplicationCommandOptionType.Subcommand,
-      name: "default",
-      description: "Change the server defaults used by newly configured channels",
-      options: DEFAULT_OPTIONS,
-    },
-    {
-      type: ApplicationCommandOptionType.Subcommand,
-      name: "stop",
-      description: "Stop the session in this voice channel",
-    },
-    {
-      type: ApplicationCommandOptionType.Subcommand,
-      name: "leaderboard",
-      description: "Show the most Pomodoro time in this server",
-      options: [PERIOD_OPTION],
-    },
-  ],
+/**
+ * The commands are top level rather than subcommands of one command.
+ *
+ * `/pomodoro` and `/start` are deliberately two names for the same action:
+ * "start a session" is the thing people type most, and making them reach for a
+ * subcommand first was friction for no benefit. `/start` exists because it is
+ * what people instinctively try; both are registered, and both do exactly the
+ * same thing.
+ */
+export const START_COMMANDS = ["pomodoro", "start"] as const;
+
+/** `/pomodoro` and `/start`: start a session in the caller's voice channel. */
+const startCommand = (name: string, description: string) =>
+  ({
+    name,
+    description,
+    options: [SPLIT_OPTION],
+  }) as const;
+
+export const POMODORO_COMMAND = startCommand(
+  "pomodoro",
+  "Start a Pomodoro session in your voice channel",
+);
+
+export const START_COMMAND = startCommand(
+  "start",
+  "Start a Pomodoro session in your voice channel (same as /pomodoro)",
+);
+
+export const STATUS_COMMAND = {
+  name: "status",
+  description: "Show the current stage, cycle and remaining time",
+} as const;
+
+export const CONFIGURE_COMMAND = {
+  name: "configure",
+  description: "Change this voice channel's saved configuration",
+  options: CONFIGURE_OPTIONS,
+} as const;
+
+export const DEFAULT_COMMAND = {
+  name: "default",
+  description: "Change the server defaults used by newly configured channels",
+  options: DEFAULT_OPTIONS,
+} as const;
+
+export const STOP_COMMAND = {
+  name: "stop",
+  description: "Stop the session in this voice channel",
+} as const;
+
+export const LEADERBOARD_COMMAND = {
+  name: "leaderboard",
+  description: "Show the most Pomodoro time in this server",
+  options: [PERIOD_OPTION],
 } as const;
 
 export const INFO_COMMAND = {
@@ -153,14 +169,18 @@ export const INFO_COMMAND = {
 export const PERIODS = ["monthly", "yearly", "all-time"] as const;
 export type LeaderboardPeriodChoice = (typeof PERIODS)[number];
 
-export const APPLICATION_COMMANDS = [POMODORO_COMMAND, INFO_COMMAND] as const;
-
-export const POMODORO_SUBCOMMANDS = [
-  "start",
-  "status",
-  "configure",
-  "default",
-  "stop",
-  "leaderboard",
+export const APPLICATION_COMMANDS = [
+  POMODORO_COMMAND,
+  START_COMMAND,
+  STATUS_COMMAND,
+  CONFIGURE_COMMAND,
+  DEFAULT_COMMAND,
+  STOP_COMMAND,
+  LEADERBOARD_COMMAND,
+  INFO_COMMAND,
 ] as const;
-export type PomodoroSubcommand = (typeof POMODORO_SUBCOMMANDS)[number];
+
+/** Commands that begin a session, and are therefore interchangeable. */
+export function isStartCommand(name: string): boolean {
+  return (START_COMMANDS as readonly string[]).includes(name);
+}

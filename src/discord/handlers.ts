@@ -5,7 +5,13 @@ import type { Db } from "../db/database";
 import { getActiveSession, saveActiveSession } from "../db/session-repository";
 import { BUILT_IN_DEFAULTS, resolveConfig } from "../domain/config";
 import { SplitError, parseSplit } from "../domain/split";
-import { changeSplit, isStopped, remainingMs, startSession } from "../domain/timer";
+import {
+  type TimerSession,
+  changeSplit,
+  isStopped,
+  remainingMs,
+  startSession,
+} from "../domain/timer";
 import { SPLIT_INPUT_ID, SPLIT_MODAL_ID, buildSplitModal } from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
@@ -18,10 +24,14 @@ import type { SessionSupervisor } from "../session/supervisor";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
 import {
+  CONFIGURE_COMMAND,
+  DEFAULT_COMMAND,
   INFO_COMMAND,
-  POMODORO_COMMAND,
+  LEADERBOARD_COMMAND,
   PERIODS,
-  type PomodoroSubcommand,
+  STATUS_COMMAND,
+  STOP_COMMAND,
+  isStartCommand,
 } from "../commands/definitions";
 import { buildInfoEmbed, type InfoPayload } from "../commands/info";
 import { decideStart } from "../commands/start-decision";
@@ -86,51 +96,56 @@ async function handleInfo(
   await interaction.reply({ embeds: [buildInfoEmbed(payload)] });
 }
 
-async function handleStart(
-  interaction: ChatInputCommandInteraction,
-  deps: HandlerDeps,
-): Promise<void> {
-  const guildId = interaction.guildId;
-  if (!guildId) {
-    await interaction.reply(ephemeral("Marzano only works inside a server."));
-    return;
-  }
+/**
+ * Resolve a start request into either a started session, a refusal or an
+ * instruction to set the channel up first.
+ *
+ * Shared by the slash commands and the mention handler so the two can never
+ * disagree about precedence, permissions or the one-session-per-guild rule.
+ */
+export type StartOutcome =
+  | { kind: "reject"; message: string }
+  | { kind: "open-setup"; reason: "unconfigured" | "invalid-split" | "override" }
+  | {
+      kind: "started";
+      channelId: string;
+      config: ReturnType<typeof resolveConfig>;
+      session: TimerSession;
+    };
 
-  const targetChannelId = interaction.channelId;
-  const stored = getChannelConfig(deps.db, guildId, targetChannelId);
+export interface StartRequest {
+  guildId: string;
+  textChannelId: string;
+  voiceChannelId: string;
+  splitInput: string | null;
+}
+
+export async function startFrom(deps: HandlerDeps, request: StartRequest): Promise<StartOutcome> {
+  const { guildId, textChannelId, voiceChannelId } = request;
+
+  const stored = getChannelConfig(deps.db, guildId, voiceChannelId);
   const active = getActiveSession(deps.db, guildId);
 
   const decision = decideStart({
-    callerVoiceChannelId: callerVoiceChannelId(interaction),
-    commandVoiceChannelId: targetChannelId,
+    callerVoiceChannelId: voiceChannelId,
+    commandVoiceChannelId: textChannelId,
     hasStoredConfig: stored !== null,
-    splitInput: interaction.options.getString("split"),
+    splitInput: request.splitInput,
     activeSessionVoiceChannelId:
       active && active.state !== "stopped" ? active.voiceChannelId : null,
   });
 
-  if (decision.kind === "reject") {
-    await interaction.reply(ephemeral(decision.message));
-    return;
-  }
+  if (decision.kind === "reject") return { kind: "reject", message: decision.message };
+  if (decision.kind === "open-setup") return { kind: "open-setup", reason: decision.reason };
 
-  if (decision.kind === "open-setup") {
-    const modal = buildSplitModal({
-      title: decision.reason === "unconfigured" ? "Set up this channel" : "Check the split",
-    }).setCustomId(`${SPLIT_MODAL_ID}:${targetChannelId}`);
-    await interaction.showModal(modal);
-    return;
-  }
-
-  const now = Date.now();
   const config = resolveConfig(decision.split ?? undefined, stored?.config ?? undefined);
 
   const session = startSession({
     guildId,
-    voiceChannelId: targetChannelId,
-    textChannelId: interaction.channelId,
+    voiceChannelId,
+    textChannelId,
     config,
-    now,
+    now: Date.now(),
   });
   saveActiveSession(deps.db, session);
 
@@ -141,10 +156,46 @@ async function handleStart(
   const started = { ...session, statusMessageId: rendered.messageId };
   await deps.supervisor.begin(started);
 
+  return { kind: "started", channelId: voiceChannelId, config, session: started };
+}
+
+/** A one-line description of the split that a session is running. */
+export function describeSplit(config: ReturnType<typeof resolveConfig>): string {
+  return `focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m`;
+}
+
+async function handleStart(
+  interaction: ChatInputCommandInteraction,
+  deps: HandlerDeps,
+): Promise<void> {
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply(ephemeral("Marzano only works inside a server."));
+    return;
+  }
+
+  const outcome = await startFrom(deps, {
+    guildId,
+    textChannelId: interaction.channelId,
+    voiceChannelId: interaction.channelId,
+    splitInput: interaction.options.getString("split"),
+  });
+
+  if (outcome.kind === "reject") {
+    await interaction.reply(ephemeral(outcome.message));
+    return;
+  }
+
+  if (outcome.kind === "open-setup") {
+    const modal = buildSplitModal({
+      title: outcome.reason === "unconfigured" ? "Set up this channel" : "Check the split",
+    }).setCustomId(`${SPLIT_MODAL_ID}:${interaction.channelId}`);
+    await interaction.showModal(modal);
+    return;
+  }
+
   await interaction.reply(
-    ephemeral(
-      `Session started - focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ${config.longBreakMinutes}m. Controls are in the channel.`,
-    ),
+    ephemeral(`Session started - ${describeSplit(outcome.config)}. Controls are in the channel.`),
   );
 }
 
@@ -455,33 +506,41 @@ export async function handleInteraction(
 
   if (!interaction.isChatInputCommand()) return;
 
-  if (interaction.commandName === INFO_COMMAND.name) {
+  const command = interaction.commandName;
+
+  if (command === INFO_COMMAND.name) {
     await handleInfo(interaction, deps);
     return;
   }
 
-  if (interaction.commandName !== POMODORO_COMMAND.name) return;
+  // /pomodoro and /start are the same command under two names.
+  if (isStartCommand(command)) {
+    await handleStart(interaction, deps);
+    return;
+  }
 
-  const subcommand = interaction.options.getSubcommand(true) as PomodoroSubcommand;
+  if (command === STATUS_COMMAND.name) {
+    await handleStatus(interaction, deps);
+    return;
+  }
 
-  switch (subcommand) {
-    case "start":
-      await handleStart(interaction, deps);
-      return;
-    case "status":
-      await handleStatus(interaction, deps);
-      return;
-    case "configure":
-      await handleConfigure(interaction, deps);
-      return;
-    case "default":
-      await handleDefault(interaction, deps);
-      return;
-    case "stop":
-      await handleStop(interaction, deps);
-      return;
-    case "leaderboard":
-      await handleLeaderboard(interaction, deps);
-      return;
+  if (command === CONFIGURE_COMMAND.name) {
+    await handleConfigure(interaction, deps);
+    return;
+  }
+
+  if (command === DEFAULT_COMMAND.name) {
+    await handleDefault(interaction, deps);
+    return;
+  }
+
+  if (command === STOP_COMMAND.name) {
+    await handleStop(interaction, deps);
+    return;
+  }
+
+  if (command === LEADERBOARD_COMMAND.name) {
+    await handleLeaderboard(interaction, deps);
+    return;
   }
 }

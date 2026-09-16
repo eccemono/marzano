@@ -8,6 +8,7 @@ import { openMigratedDatabase } from "./db/bootstrap";
 import { listActiveSessions } from "./db/session-repository";
 import { createClient } from "./discord/client";
 import { handleInteraction } from "./discord/handlers";
+import { handleMention } from "./discord/mention";
 import { createHealthReporter } from "./health";
 import { createMessageGateway } from "./discord/message-gateway";
 import { SessionRenderer } from "./discord/session-renderer";
@@ -189,6 +190,29 @@ async function main(): Promise<void> {
       void supervisor.presenceChanged(guildId).catch((error: unknown) => {
         logger.warn("presence check failed", {
           guildId,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      });
+    });
+
+    // Summoning by name. GuildMessages gives the event and the mention metadata
+    // but not the message text, so this cannot read what anyone said.
+    client.on(Events.MessageCreate, (message) => {
+      void handleMention(message, {
+        db,
+        deps: {
+          db,
+          presenter,
+          supervisor,
+          uptimeSeconds: () => Math.floor((Date.now() - startedAt) / 1_000),
+          gatewayLatencyMs: () => client.ws.ping,
+          guildCount: () => client.guilds.cache.size,
+          applicationId: () => client.application?.id ?? config.clientId,
+        },
+        botUserId: () => client.user?.id ?? null,
+        logger: logger.child({ component: "mention" }),
+      }).catch((error: unknown) => {
+        logger.warn("mention handling failed", {
           reason: error instanceof Error ? error.message : String(error),
         });
       });

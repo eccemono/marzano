@@ -34,10 +34,25 @@ describe("intents", () => {
     expect(BOT_INTENTS).not.toContain(GatewayIntentBits.MessageContent);
   });
 
-  it("requests only the two non-privileged intents it needs", () => {
+  it("requests only the three non-privileged intents it needs", () => {
+    // GuildMessages is needed so an explicit @mention can start a session. It
+    // delivers the event and the mention metadata but not the message text, so
+    // it does not weaken the intent above - and unlike Message Content it is not
+    // a privileged intent, so it needs no approval to enable.
     expect([...BOT_INTENTS].sort()).toEqual(
-      [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates].sort(),
+      [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMessages,
+      ].sort(),
     );
+  });
+
+  it("never requests a privileged intent", () => {
+    const privileged = [GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers];
+    for (const intent of privileged) {
+      expect(BOT_INTENTS).not.toContain(intent);
+    }
   });
 });
 
