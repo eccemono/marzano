@@ -4,7 +4,7 @@ import { BUILT_IN_DEFAULTS } from "../src/domain/config";
 import { createLogger } from "../src/logger";
 import type { PlaybackResult, VoiceGateway } from "../src/voice/gateway";
 import { SessionVoice, type VoiceSession } from "../src/voice/manager";
-import { BELL, START_CUE, type SoundName } from "../src/voice/sounds";
+import { BREAK_CUE, JOIN_CUE, WORK_CUE, type SoundName } from "../src/voice/sounds";
 
 const GUILD = "111111111111111111";
 const GUILD_B = "444444444444444444";
@@ -75,6 +75,7 @@ function newSession(overrides: Partial<VoiceSession> = {}): VoiceSession {
   return {
     guildId: GUILD,
     voiceChannelId: "222222222222222222",
+    stage: "focus",
     config: { soundEnabled: true, soundVolume: BUILT_IN_DEFAULTS.soundVolume },
     ...overrides,
   };
@@ -87,7 +88,7 @@ function setup() {
 }
 
 describe("session start", () => {
-  it("joins and plays the cue then the bell, with no self-state toggling", async () => {
+  it("joins and plays the join cue, with no self-state toggling", async () => {
     const { gateway, voice } = setup();
 
     await voice.announceStart(newSession());
@@ -96,8 +97,7 @@ describe("session start", () => {
     // bot simply plays. The toggling is exactly what broke audio in production.
     expect(gateway.calls).toEqual([
       `join:${GUILD}:222222222222222222`,
-      `play:${GUILD}:${START_CUE}:80`,
-      `play:${GUILD}:${BELL}:80`,
+      `play:${GUILD}:${JOIN_CUE}:80`,
     ]);
   });
 
@@ -121,17 +121,30 @@ describe("session start", () => {
 });
 
 describe("stage transitions", () => {
-  it("plays the bell only, never the start cue", async () => {
+  it("plays the work cue when a work period begins, never the join cue", async () => {
     const { gateway, voice } = setup();
-    const session = newSession();
+    const session = newSession({ stage: "focus" });
 
     await voice.announceStart(session);
     gateway.calls.length = 0;
 
     await voice.announceTransition(session);
 
-    expect(gateway.playedSounds).toEqual([`play:${BELL}:80`]);
-    expect(gateway.playedSounds).not.toContain(`play:${START_CUE}:80`);
+    expect(gateway.playedSounds).toEqual([`play:${WORK_CUE}:80`]);
+    expect(gateway.playedSounds).not.toContain(`play:${JOIN_CUE}:80`);
+  });
+
+  it("plays a different cue when a break begins", async () => {
+    // Work starting and work ending have to be tellable apart by ear.
+    const { gateway, voice } = setup();
+    const session = newSession({ stage: "short_break" });
+
+    await voice.announceStart(session);
+    gateway.calls.length = 0;
+
+    await voice.announceTransition(session);
+
+    expect(gateway.playedSounds).toEqual([`play:${BREAK_CUE}:80`]);
   });
 
   it("reuses the existing connection instead of rejoining", async () => {
@@ -182,10 +195,10 @@ describe("sound configuration", () => {
 
     await voice.announceStart(newSession({ config: { soundEnabled: true, soundVolume: 35 } }));
 
-    expect(gateway.playedSounds).toEqual([`play:${START_CUE}:35`, `play:${BELL}:35`]);
+    expect(gateway.playedSounds).toEqual([`play:${JOIN_CUE}:35`]);
   });
 
-  it("only ever requests the generated cue sounds, never speech", async () => {
+  it("only ever requests the committed cue sounds, never speech", async () => {
     const { gateway, voice } = setup();
 
     await voice.announceStart(newSession());
@@ -193,7 +206,7 @@ describe("sound configuration", () => {
 
     for (const call of gateway.played) {
       const sound = call.split(":")[2];
-      expect([START_CUE, BELL]).toContain(sound);
+      expect([JOIN_CUE, WORK_CUE, BREAK_CUE]).toContain(sound);
     }
   });
 });
@@ -264,7 +277,7 @@ describe("resilience", () => {
 
     await expect(voice.announceStart(newSession())).resolves.toBeUndefined();
 
-    expect(gateway.played).toHaveLength(2);
+    expect(gateway.played).toHaveLength(1);
     expect(gateway.silenced).toBe(true);
   });
 

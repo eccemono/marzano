@@ -6,9 +6,10 @@
  *   - The bot joins the session's voice channel and is muted and deafened while
  *     nothing is playing. It unmutes and undeafens only for the length of a cue,
  *     then goes quiet again.
- *   - A session start plays the cue and then the bell. Every later stage
- *     boundary plays the bell only - there are no spoken announcements, and no
- *     text-to-speech anywhere in the bot.
+ *   - A session start plays the join cue. Every later stage boundary plays the
+ *     cue for the stage that just began - different for work and for a break.
+ *     There are no spoken announcements, and no text-to-speech anywhere in the
+ *     bot.
  *   - Audio is strictly decorative. Every failure path here ends in a log line
  *     and a `return`; nothing in this class can fail a session, and callers are
  *     expected to invoke it without awaiting so playback never delays the timer.
@@ -16,16 +17,19 @@
  *     leave, silence or replace a session in another.
  */
 
+import type { SessionStage } from "../domain/timer";
 import type { Logger } from "../logger";
 
 import type { PlaybackStrategy } from "./diagnostics";
 import type { TestPlaybackReport, VoiceGateway } from "./gateway";
-import { BELL, START_CUE, type SoundName } from "./sounds";
+import { BREAK_CUE, JOIN_CUE, WORK_CUE, type SoundName } from "./sounds";
 
 /** The subset of a session this layer needs. */
 export interface VoiceSession {
   guildId: string;
   voiceChannelId: string;
+  /** The stage the session is *now* in, which picks the boundary cue. */
+  stage: SessionStage;
   config: {
     soundEnabled: boolean;
     soundVolume: number;
@@ -82,19 +86,19 @@ export class SessionVoice {
     return true;
   }
 
-  /** Cue and bell, played once when a session starts. */
+  /** The join cue, played once when the bot joins a session's channel. */
   async announceStart(session: VoiceSession): Promise<void> {
-    await this.announce(session, true);
+    await this.announce(session, JOIN_CUE);
   }
 
   /**
-   * Bell only, played at a stage boundary.
+   * The boundary cue for the stage that has just begun.
    *
-   * Deliberately never plays the start cue: a break starting should sound
-   * different from a session starting.
+   * A work period and a break deliberately sound different - one means "start",
+   * the other "stop and rest" - so they are tellable apart without looking.
    */
   async announceTransition(session: VoiceSession): Promise<void> {
-    await this.announce(session, false);
+    await this.announce(session, session.stage === "focus" ? WORK_CUE : BREAK_CUE);
   }
 
   /**
@@ -156,16 +160,13 @@ export class SessionVoice {
     }
   }
 
-  private async announce(session: VoiceSession, withCue: boolean): Promise<void> {
+  private async announce(session: VoiceSession, sound: SoundName): Promise<void> {
     if (!(await this.join(session))) return;
 
     const { soundEnabled, soundVolume } = session.config;
     if (!soundEnabled || soundVolume <= 0) return;
 
-    if (withCue) {
-      await this.play(session, START_CUE, soundVolume);
-    }
-    await this.play(session, BELL, soundVolume);
+    await this.play(session, sound, soundVolume);
   }
 
   private async play(session: VoiceSession, sound: SoundName, volume: number): Promise<void> {

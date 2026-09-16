@@ -23,7 +23,14 @@ import {
   listActiveSessions,
   saveActiveSession,
 } from "../db/session-repository";
-import { advance, isPaused, isStopped, terminate, type TimerSession } from "../domain/timer";
+import {
+  advance,
+  delayFirstStage,
+  isPaused,
+  isStopped,
+  terminate,
+  type TimerSession,
+} from "../domain/timer";
 import type { SessionRendererPort } from "../discord/session-renderer";
 import { buildSummaryEmbed } from "../discord/history-views";
 import type { SessionHistory } from "./history";
@@ -36,6 +43,14 @@ export const DEFAULT_GRACE_MS = 60_000;
 
 /** Bound on graceful shutdown, so a stuck connection cannot block a kill. */
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
+
+/**
+ * A beat between the join cue and the first work period.
+ *
+ * The cue is the signal that the session is starting, so the clock waits for it
+ * to be heard rather than running underneath it.
+ */
+export const JOIN_PRE_ROLL_MS = 5_000;
 
 /** The optional voice-channel status, cleared when a session ends. */
 export interface VoiceStatusPort {
@@ -51,6 +66,13 @@ export interface SupervisorOptions {
   now?: () => number;
   schedule?: ScheduleFn;
   graceMs?: number;
+  /**
+   * Delay before the first work period's clock starts.
+   *
+   * Defaults to {@link JOIN_PRE_ROLL_MS}. Tests that assert exact deadlines pass
+   * 0 and cover the pre-roll separately.
+   */
+  preRollMs?: number;
   voiceStatus?: VoiceStatusPort;
   /** Durable history. Optional so the lifecycle rules can be tested alone. */
   history?: SessionHistory;
@@ -93,6 +115,7 @@ export class SessionSupervisor {
   private readonly now: () => number;
   private readonly schedule: ScheduleFn;
   private readonly graceMs: number;
+  private readonly preRollMs: number;
   private readonly voiceStatus: VoiceStatusPort | undefined;
   private readonly history: SessionHistory | undefined;
 
@@ -109,6 +132,7 @@ export class SessionSupervisor {
     this.now = options.now ?? (() => Date.now());
     this.schedule = options.schedule ?? systemSchedule;
     this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
+    this.preRollMs = options.preRollMs ?? JOIN_PRE_ROLL_MS;
     this.voiceStatus = options.voiceStatus;
     this.history = options.history;
   }
@@ -128,21 +152,25 @@ export class SessionSupervisor {
    * the opening cue.
    */
   async begin(session: TimerSession): Promise<void> {
-    saveActiveSession(this.db, session);
+    // The join cue plays first and the clock waits a beat, so the sound lands
+    // before the work period is under way rather than underneath it.
+    const started = delayFirstStage(session, this.preRollMs);
+
+    saveActiveSession(this.db, started);
 
     // The refresh loop belongs to the session, not to startup. Creating loops
     // only for the sessions that existed at boot is why a session started
     // afterwards had no loop at all and its countdown sat frozen on screen.
-    this.presenter.watch(session.guildId);
+    this.presenter.watch(started.guildId);
 
     // Open the history run at the same moment the session starts, so no stage
     // can ever end before there is somewhere to record it.
-    this.history?.begin(session.guildId, session.voiceChannelId, this.now());
+    this.history?.begin(started.guildId, started.voiceChannelId, this.now());
 
-    this.scheduleStageWake(session);
+    this.scheduleStageWake(started);
     // Fire and forget: the cue must never delay the interaction that started
     // it - but it must still not become an unhandled rejection.
-    this.detach(session.guildId, "start cue", this.voice.announceStart(session));
+    this.detach(started.guildId, "join cue", this.voice.announceStart(started));
   }
 
   /**

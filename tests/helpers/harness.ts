@@ -144,6 +144,13 @@ export class FakeAudience implements VoiceAudience {
 
 export interface HarnessOptions {
   graceMs?: number;
+  /**
+   * Delay before the first work period.
+   *
+   * Zero by default, so tests that assert an exact schedule lattice are not
+   * perturbed by it; the pre-roll is covered by its own test.
+   */
+  preRollMs?: number;
   /** Capture logs from the supervisor under test. */
   logger?: Logger;
   /** Reuse an existing database, to simulate a process restart. */
@@ -170,6 +177,7 @@ export function setup(options: HarnessOptions = {}) {
     now: () => timers.now,
     schedule: (delayMs, fn) => timers.schedule(delayMs, fn),
     ...(options.graceMs === undefined ? {} : { graceMs: options.graceMs }),
+    preRollMs: options.preRollMs ?? 0,
   });
 
   return { db, timers, voice, presenter, audience, supervisor };

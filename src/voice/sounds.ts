@@ -11,6 +11,10 @@
  * still exists because the `/test` audio diagnostic needs it to exercise that
  * path deliberately.
  *
+ * The three cues are committed assets converted from the operator's own audio
+ * rather than synthesised here, so a cue can be swapped by replacing one WAV.
+ * They must be 48kHz mono 16-bit PCM, which is what the raw path expects.
+ *
  * No failure in here is ever allowed to throw at the caller: a missing asset, an
  * unusable encoder or a corrupt file degrades to silence, and the session
  * carries on. Sound is a nicety, not the product.
@@ -25,15 +29,18 @@ import { encodeToOpusFrames } from "./opus";
 import { applyVolume } from "./tones";
 import { SAMPLE_RATE, decodeWav } from "./wav";
 
-/** The cue played once at session start. */
-export const START_CUE = "start";
+/** Played once when the bot joins a session's voice channel. */
+export const JOIN_CUE = "startwork";
 
-/** The bell played at every stage boundary, including the first. */
-export const BELL = "bell";
+/** Played when a work period begins. */
+export const WORK_CUE = "work";
 
-export type SoundName = typeof START_CUE | typeof BELL;
+/** Played when a break begins - which is also the end of a work period. */
+export const BREAK_CUE = "break";
 
-export const SOUND_NAMES: readonly SoundName[] = [START_CUE, BELL];
+export type SoundName = typeof JOIN_CUE | typeof WORK_CUE | typeof BREAK_CUE;
+
+export const SOUND_NAMES: readonly SoundName[] = [JOIN_CUE, WORK_CUE, BREAK_CUE];
 
 export interface SoundLoadReport {
   available: SoundName[];
@@ -59,7 +66,7 @@ export interface SoundLibrary {
 }
 
 export interface SoundLibraryOptions {
-  /** Directory holding `start.wav` and `bell.wav`. */
+  /** Directory holding `startwork.wav`, `work.wav` and `break.wav`. */
   directory: string;
   logger: Logger;
   /** Injectable for tests. */

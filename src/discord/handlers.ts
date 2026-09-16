@@ -43,7 +43,7 @@ import { periodBounds, type LeaderboardPeriod } from "../domain/attendance";
 import type { SessionRendererPort } from "./session-renderer";
 import type { SessionSupervisor } from "../session/supervisor";
 import type { SessionVoice } from "../voice/manager";
-import { BELL, type SoundLibrary } from "../voice/sounds";
+import { WORK_CUE, type SoundLibrary } from "../voice/sounds";
 import {
   PLAYBACK_STRATEGIES,
   STRATEGY_HELP,
@@ -579,8 +579,8 @@ async function handleTest(
   lines.push(`bot perms: ${botPermissions(interaction, deps, voiceChannelId)}`);
   lines.push(`voice connection: ${deps.voice.isConnected(guildId) ? "ready" : "none"}`);
 
-  const bellFrames = deps.sounds?.frames(BELL, 80)?.length;
-  lines.push(`bell frames at 80%: ${bellFrames ?? "unavailable"}`);
+  const bellFrames = deps.sounds?.frames(WORK_CUE, 80)?.length;
+  lines.push(`work cue frames at 80%: ${bellFrames ?? "unavailable"}`);
 
   const strategies: readonly PlaybackStrategy[] =
     strategy === "diag" ? PLAYBACK_STRATEGIES : [strategy];
@@ -588,6 +588,7 @@ async function handleTest(
   const session = {
     guildId,
     voiceChannelId,
+    stage: "focus" as const,
     config: { soundEnabled: true, soundVolume: 100 },
   };
 

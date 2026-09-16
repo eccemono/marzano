@@ -29,6 +29,18 @@ describe("begin", () => {
     await flush();
     expect(voice.startCues).toBe(1);
   });
+
+  it("holds the first work period back so the join cue is heard first", async () => {
+    // The cue signals that the session is starting, so the clock must not
+    // already be running underneath it.
+    const { db, timers, supervisor } = setup({ preRollMs: 5_000 });
+    const session = newSession();
+
+    await supervisor.begin(session);
+
+    expect(getActiveSession(db, GUILD)?.stageEndsAt).toBe((session.stageEndsAt ?? 0) + 5_000);
+    expect(timers.delays[0]).toBe(25 * MINUTE + 5_000);
+  });
 });
 
 describe("wake", () => {

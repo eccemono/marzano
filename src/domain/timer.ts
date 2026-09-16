@@ -169,6 +169,23 @@ export function isStageComplete(session: TimerSession, now: number): boolean {
   return session.state === "running" && session.stageEndsAt !== null && now >= session.stageEndsAt;
 }
 
+/**
+ * Push a fresh session's first stage back by `ms`.
+ *
+ * The join cue plays the moment the bot connects, and the clock should not
+ * already be running underneath it: the cue is the signal that the session is
+ * about to start, so the work period waits for it to be heard.
+ */
+export function delayFirstStage(session: TimerSession, ms: number): TimerSession {
+  if (ms <= 0 || session.stage !== "focus" || session.state !== "running") return session;
+
+  return {
+    ...session,
+    stageStartedAt: session.stageStartedAt === null ? null : session.stageStartedAt + ms,
+    stageEndsAt: session.stageEndsAt === null ? null : session.stageEndsAt + ms,
+  };
+}
+
 export interface AdvanceResult {
   session: TimerSession;
   transitions: Transition[];
