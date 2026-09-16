@@ -5,51 +5,19 @@ import { type Client, Events } from "discord.js";
 import { registerCommands } from "./commands/register";
 import { loadConfig } from "./config/env";
 import { openMigratedDatabase } from "./db/bootstrap";
-import { getActiveSession, listActiveSessions, saveActiveSession } from "./db/session-repository";
+import { listActiveSessions } from "./db/session-repository";
 import { createClient } from "./discord/client";
 import { handleInteraction } from "./discord/handlers";
 import { createHealthReporter } from "./health";
 import { createMessageGateway } from "./discord/message-gateway";
-import { SessionPresenter } from "./discord/session-presenter";
-import { createLogger, type Logger } from "./logger";
+import { SessionRenderer } from "./discord/session-renderer";
+import { createLogger } from "./logger";
 import { BOT_NAME, REPOSITORY_URL, VERSION, assertSupportedNode } from "./runtime";
 import { createDiscordAudience } from "./session/audience";
 import { SessionSupervisor } from "./session/supervisor";
 import { createDiscordVoiceGateway } from "./voice/gateway";
 import { SessionVoice } from "./voice/manager";
 import { createSoundLibrary } from "./voice/sounds";
-
-/**
- * Keep the countdown on screen ticking.
- *
- * This is presentation only. The supervisor owns when a stage actually ends;
- * this loop just re-renders so the remaining time stays roughly current rather
- * than frozen at the moment the last event happened.
- */
-function startRefreshLoops(
-  client: Client,
-  logger: Logger,
-  db: ReturnType<typeof openMigratedDatabase>["db"],
-): void {
-  for (const guild of client.guilds.cache.values()) {
-    const session = getActiveSession(db, guild.id);
-    if (!session || session.state === "stopped") continue;
-
-    const presenter = new SessionPresenter({
-      gateway: createMessageGateway(client),
-      logger: logger.child({ component: "session", guildId: guild.id }),
-    });
-
-    presenter.startLoop(
-      () => getActiveSession(db, guild.id),
-      (rendered, result) => {
-        if (result.messageId !== rendered.statusMessageId) {
-          saveActiveSession(db, { ...rendered, statusMessageId: result.messageId });
-        }
-      },
-    );
-  }
-}
 
 async function main(): Promise<void> {
   const bootstrap = createLogger();
@@ -102,7 +70,11 @@ async function main(): Promise<void> {
       logger: logger.child({ component: "voice" }),
     });
 
-    const presenter = new SessionPresenter({
+    // One presenter per guild. The supervisor starts and stops each guild's
+    // refresh loop as sessions begin and end, so a session started at any time
+    // keeps its countdown live.
+    const presenter = new SessionRenderer({
+      db,
       gateway: createMessageGateway(client),
       logger: logger.child({ component: "session" }),
     });
@@ -185,8 +157,6 @@ async function main(): Promise<void> {
           recovered = true;
           health.beat();
         }
-
-        startRefreshLoops(client, logger, db);
       })();
     });
 

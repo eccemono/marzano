@@ -47,8 +47,15 @@ export function createMessageGateway(client: Client): SessionMessageGateway {
       const channel = await resolveTextChannel(client, channelId);
 
       try {
-        const message = await channel.messages.fetch(messageId);
-        await message.edit({ embeds: payload.embeds, components: payload.components });
+        // Edit by id rather than `messages.fetch()` then `message.edit()`. The
+        // fetch is a *read* of the channel's history and needs Read Message
+        // History, which this bot deliberately does not request - so fetching
+        // first made every refresh fail in production. Editing by id needs only
+        // Send Messages, which it already has.
+        await channel.messages.edit(messageId, {
+          embeds: payload.embeds,
+          components: payload.components,
+        });
       } catch (error) {
         if (isMissingTarget(error)) {
           throw new SessionMessageMissingError(

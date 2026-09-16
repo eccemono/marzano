@@ -11,7 +11,7 @@ import { migrate } from "../../src/db/migrations";
 import { openInMemoryDatabase } from "../../src/db/database";
 import { BUILT_IN_DEFAULTS } from "../../src/domain/config";
 import { startSession, type TimerSession } from "../../src/domain/timer";
-import type { SessionPresenter } from "../../src/discord/session-presenter";
+import type { SessionRendererPort } from "../../src/discord/session-renderer";
 import { createLogger, type Logger } from "../../src/logger";
 import type { ScheduleFn, TimerHandle, VoiceAudience } from "../../src/session/ports";
 import { SessionSupervisor } from "../../src/session/supervisor";
@@ -90,6 +90,9 @@ export class FakeVoice {
   async leave(): Promise<void> {
     this.leaves += 1;
   }
+  async leaveAll(): Promise<void> {
+    this.leaves += 1;
+  }
   async announceStart(): Promise<void> {
     this.startCues += 1;
   }
@@ -101,10 +104,24 @@ export class FakeVoice {
 export class FakePresenter {
   renders: TimerSession[] = [];
   nextMessageId = "message-1";
+  /** Guilds with a live refresh loop. */
+  readonly watching = new Set<string>();
 
   async render(session: TimerSession) {
     this.renders.push(session);
     return { messageId: session.statusMessageId ?? this.nextMessageId, replaced: false };
+  }
+
+  watch(guildId: string): void {
+    this.watching.add(guildId);
+  }
+
+  unwatch(guildId: string): void {
+    this.watching.delete(guildId);
+  }
+
+  unwatchAll(): void {
+    this.watching.clear();
   }
 }
 
@@ -142,7 +159,7 @@ export function setup(options: HarnessOptions = {}) {
   const supervisor = new SessionSupervisor({
     db,
     voice: voice as unknown as SessionVoice,
-    presenter: presenter as unknown as SessionPresenter,
+    presenter: presenter as unknown as SessionRendererPort,
     audience,
     logger: options.logger ?? silentLogger(),
     now: () => timers.now,

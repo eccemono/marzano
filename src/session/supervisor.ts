@@ -24,7 +24,7 @@ import {
   saveActiveSession,
 } from "../db/session-repository";
 import { advance, isPaused, isStopped, terminate, type TimerSession } from "../domain/timer";
-import type { SessionPresenter } from "../discord/session-presenter";
+import type { SessionRendererPort } from "../discord/session-renderer";
 import type { SessionVoice } from "../voice/manager";
 
 import { type ScheduleFn, type TimerHandle, type VoiceAudience, systemSchedule } from "./ports";
@@ -38,7 +38,7 @@ export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 export interface SupervisorOptions {
   db: Db;
   voice: SessionVoice;
-  presenter: SessionPresenter;
+  presenter: SessionRendererPort;
   audience: VoiceAudience;
   logger: Logger;
   now?: () => number;
@@ -77,7 +77,7 @@ function idle(): WakeOutcome {
 export class SessionSupervisor {
   private readonly db: Db;
   private readonly voice: SessionVoice;
-  private readonly presenter: SessionPresenter;
+  private readonly presenter: SessionRendererPort;
   private readonly audience: VoiceAudience;
   private readonly logger: Logger;
   private readonly now: () => number;
@@ -115,6 +115,12 @@ export class SessionSupervisor {
    */
   async begin(session: TimerSession): Promise<void> {
     saveActiveSession(this.db, session);
+
+    // The refresh loop belongs to the session, not to startup. Creating loops
+    // only for the sessions that existed at boot is why a session started
+    // afterwards had no loop at all and its countdown sat frozen on screen.
+    this.presenter.watch(session.guildId);
+
     this.scheduleStageWake(session);
     // Fire and forget: the cue must never delay the interaction that started
     // it - but it must still not become an unhandled rejection.
@@ -190,6 +196,13 @@ export class SessionSupervisor {
     }
 
     this.scheduleStageWake(advanced);
+
+    // A natural boundary has to repaint the message itself. Without this the
+    // stored session advances while the embed still shows the stage that just
+    // ended, and it only catches up when somebody presses a button.
+    if (transitions.length > 0) {
+      this.detach(guildId, "boundary render", this.renderAndTrack(advanced));
+    }
 
     return {
       transitions: transitions.length,
@@ -353,7 +366,12 @@ export class SessionSupervisor {
 
     this.clearTimers(guildId);
 
-    await this.voice.leave();
+    // Stop refreshing before the row disappears: a loop that ticked in between
+    // would find no session and render nothing, and on a slow reply could even
+    // repaint the live view over the terminal one.
+    this.presenter.unwatch(guildId);
+
+    await this.voice.leave(guildId);
 
     // Show the terminal state, then drop the row so the guild can start again.
     await this.presenter.render(stopped);
@@ -381,6 +399,8 @@ export class SessionSupervisor {
     for (const handle of this.graceTimers.values()) handle.cancel();
     this.graceTimers.clear();
 
+    this.presenter.unwatchAll();
+
     const now = this.now();
     for (const session of listActiveSessions(this.db)) {
       if (isStopped(session) || isPaused(session)) continue;
@@ -391,7 +411,7 @@ export class SessionSupervisor {
 
     // Leave cleanly, but never let a wedged connection outlast the kill timeout.
     await Promise.race([
-      this.voice.leave(),
+      this.voice.leaveAll(),
       new Promise<void>((resolve) => {
         const handle = setTimeout(resolve, timeoutMs);
         if (typeof handle.unref === "function") handle.unref();
@@ -403,10 +423,8 @@ export class SessionSupervisor {
   private async restore(guildId: string, session: ActiveSessionRecord): Promise<void> {
     await this.voice.join(session);
 
-    const rendered = await this.presenter.render(session);
-    if (rendered.messageId !== session.statusMessageId) {
-      saveActiveSession(this.db, { ...session, statusMessageId: rendered.messageId });
-    }
+    this.presenter.watch(guildId);
+    await this.renderAndTrack(session);
 
     if (!isPaused(session)) this.scheduleStageWake(session);
 
@@ -415,6 +433,20 @@ export class SessionSupervisor {
       stage: session.stage,
       state: session.state,
     });
+  }
+
+  /**
+   * Render the status message and persist a replacement message id.
+   *
+   * If the status message was deleted, the presenter posts a new one. Every
+   * later edit has to target that new id, so the id is written back here rather
+   * than left to the caller to remember.
+   */
+  private async renderAndTrack(session: ActiveSessionRecord): Promise<void> {
+    const rendered = await this.presenter.render(session);
+    if (rendered.messageId !== session.statusMessageId) {
+      saveActiveSession(this.db, { ...session, statusMessageId: rendered.messageId });
+    }
   }
 
   /**

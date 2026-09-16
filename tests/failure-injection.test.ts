@@ -4,6 +4,7 @@ import { openInMemoryDatabase } from "../src/db/database";
 import { migrate } from "../src/db/migrations";
 import { getActiveSession, saveActiveSession } from "../src/db/session-repository";
 import { SessionMessageMissingError, SessionPresenter } from "../src/discord/session-presenter";
+import type { SessionRendererPort } from "../src/discord/session-renderer";
 import { createLogger } from "../src/logger";
 import { SessionSupervisor } from "../src/session/supervisor";
 import type { SessionVoice } from "../src/voice/manager";
@@ -12,7 +13,6 @@ import {
   GUILD,
   MINUTE,
   START,
-  type FakePresenter,
   type FakeVoice,
   newSession,
   setup,
@@ -42,7 +42,7 @@ function capture() {
 /** A presenter wired to a real SessionPresenter whose gateway misbehaves. */
 function presenterWithGateway(behaviour: { edit: "missing" | "ok"; postId: string }) {
   const posts: string[] = [];
-  const presenter = new SessionPresenter({
+  const inner = new SessionPresenter({
     gateway: {
       async post() {
         posts.push(behaviour.postId);
@@ -55,6 +55,16 @@ function presenterWithGateway(behaviour: { edit: "missing" | "ok"; postId: strin
     logger: silentLogger(),
     now: () => START,
   });
+
+  // The supervisor depends on the renderer port. These tests are about the
+  // render path, not the refresh loop, so the loop hooks stay inert.
+  const presenter: SessionRendererPort = {
+    render: (session) => inner.render(session),
+    watch: () => {},
+    unwatch: () => {},
+    unwatchAll: () => {},
+  };
+
   return { presenter, posts };
 }
 
@@ -211,14 +221,15 @@ function fakeVoice(): FakeVoice {
   } as unknown as FakeVoice;
 }
 
-function fakePresenter(): FakePresenter {
+function fakePresenter(): SessionRendererPort {
   return {
-    renders: [],
-    nextMessageId: "message-1",
     async render(session: { statusMessageId: string | null }) {
       return { messageId: session.statusMessageId ?? "message-1", replaced: false };
     },
-  } as unknown as FakePresenter;
+    watch() {},
+    unwatch() {},
+    unwatchAll() {},
+  };
 }
 
 function fakeAudience() {
