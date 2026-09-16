@@ -87,7 +87,7 @@ export function actionForButtonId(customId: string): SessionAction | null {
  * the only state needed - nothing has to be remembered between the click that
  * asks and the click that answers.
  */
-const CONFIRMABLE_ACTIONS: readonly SessionAction[] = ["stop"];
+const CONFIRMABLE_ACTIONS: readonly SessionAction[] = [];
 
 export function confirmIdFor(action: SessionAction): string {
   return `${SESSION_BUTTON_IDS.confirm}:${action}`;

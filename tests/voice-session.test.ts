@@ -87,18 +87,17 @@ function setup() {
 }
 
 describe("session start", () => {
-  it("joins, unmutes, plays the cue then the bell, and goes quiet again", async () => {
+  it("joins and plays the cue then the bell, with no self-state toggling", async () => {
     const { gateway, voice } = setup();
 
     await voice.announceStart(newSession());
 
+    // No mute/deafen toggling around playback: the join is fully open and the
+    // bot simply plays. The toggling is exactly what broke audio in production.
     expect(gateway.calls).toEqual([
       `join:${GUILD}:222222222222222222`,
-      `silenced:${GUILD}:true`,
-      `silenced:${GUILD}:false`,
       `play:${GUILD}:${START_CUE}:80`,
       `play:${GUILD}:${BELL}:80`,
-      `silenced:${GUILD}:true`,
     ]);
   });
 
@@ -110,17 +109,14 @@ describe("session start", () => {
     expect(gateway.silenced).toBe(true);
   });
 
-  it("re-silences even when playback throws, so the bot is never left audible", async () => {
-    // The unmute happens before playback. If anything after it throws and the
-    // silence is not restored in a finally path, the bot sits in the channel
-    // unmuted and undeafened indefinitely.
+  it("never toggles the bot's own state around playback", async () => {
+    // The old implementation muted and unmuted around every cue. That dance is
+    // gone: the bot stays fully open and just does not play between bells.
     const { gateway, voice } = setup();
-    gateway.playResult = { played: false, reason: "encoder blew up" };
 
     await voice.announceStart(newSession());
 
-    expect(gateway.silenced).toBe(true);
-    expect(gateway.calls.at(-1)).toBe(`silenced:${GUILD}:true`);
+    expect(gateway.calls.some((call) => call.startsWith("silenced:"))).toBe(false);
   });
 });
 
