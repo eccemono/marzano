@@ -437,7 +437,7 @@ describe("summary and leaderboard views", () => {
   it("marks the top three in the leaderboard and ranks by the combined total", () => {
     const embed = buildLeaderboardEmbed({ period: "monthly", totals, now: T0 });
 
-    expect(embed.title).toContain("Pomodoro leaderboard");
+    expect(embed.title).toBe("\u{1F3C6} Monthly Leaderboard (October 2025)");
     expect(embed.description.indexOf(ALICE)).toBeLessThan(embed.description.indexOf(BOB));
     expect(embed.description).toContain("\u{1F947}");
   });
@@ -462,12 +462,12 @@ describe("summary and leaderboard views", () => {
     expect(embed.title).toContain("September 2026");
   });
 
-  it("names the year naturally too", () => {
+  it("names the period naturally too", () => {
     expect(
       buildLeaderboardEmbed({ period: "yearly", totals, now: Date.UTC(2026, 3, 1) }).title,
-    ).toContain("2026");
-    expect(buildLeaderboardEmbed({ period: "all-time", totals, now: T0 }).title).toContain(
-      "All time",
+    ).toBe("\u{1F3C6} Yearly Leaderboard (2026)");
+    expect(buildLeaderboardEmbed({ period: "all-time", totals, now: T0 }).title).toBe(
+      "\u{1F3C6} All-time Leaderboard",
     );
   });
 
@@ -481,9 +481,26 @@ describe("summary and leaderboard views", () => {
       monthlyLeaderboard: totals,
     });
 
-    const month = embed.fields.find((field) => field.name === "This month so far")?.value ?? "";
+    const month =
+      embed.fields.find((field) => field.name.startsWith("Monthly Leaderboard"))?.value ?? "";
 
     expect(month).toContain("60 min");
     expect(month).toContain(`<@${ALICE}>`);
+  });
+
+  it("names the session's own date", () => {
+    const embed = buildSummaryEmbed({
+      reason: "someone stopped it",
+      startedAt: T0,
+      endedAt: T0 + HOUR,
+      outcomes: [],
+      totals,
+      monthlyLeaderboard: totals,
+    });
+
+    const date = embed.fields.find((field) => field.name === "Date")?.value ?? "";
+
+    // A Discord timestamp, so each reader sees their own locale.
+    expect(date).toBe(`<t:${Math.floor(T0 / 1_000)}:f>`);
   });
 });

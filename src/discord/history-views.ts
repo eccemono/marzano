@@ -74,17 +74,32 @@ export function buildSummaryEmbed(input: SummaryInput): SessionEmbed {
           )
           .join("\n");
 
+  // The month comes from the session's own end, so a summary rendered later
+  // (or a session that ran across midnight on the 1st) still names the right one.
+  const monthLabel = periodLabel("monthly", input.endedAt);
+
   return {
     title: "\u{1F345} Session summary",
     description: `Ended because ${input.reason}.`,
     fields: [
+      // `f` is Discord's long date-and-time, rendered in the reader's own
+      // locale, so the summary says which session this was at a glance.
+      { name: "Date", value: `<t:${Math.floor(input.startedAt / 1_000)}:f>`, inline: true },
       { name: "Duration", value: formatCredit(input.endedAt - input.startedAt), inline: true },
       { name: "Who turned up", value: input.totals.length.toString(), inline: true },
       { name: "Stages", value: lines.join("\n"), inline: false },
       { name: "Attendance", value: attendance.join("\n"), inline: false },
-      { name: "This month so far", value: month, inline: false },
+      { name: `Monthly Leaderboard (${monthLabel})`, value: month, inline: false },
     ],
   };
+}
+
+/** `Monthly Leaderboard (September 2026)`, and its yearly/all-time equivalents. */
+export function leaderboardTitle(period: LeaderboardPeriod, now: number): string {
+  if (period === "all-time") return "\u{1F3C6} All-time Leaderboard";
+  const kind = period === "monthly" ? "Monthly" : "Yearly";
+
+  return `\u{1F3C6} ${kind} Leaderboard (${periodLabel(period, now)})`;
 }
 
 export interface LeaderboardInput {
@@ -104,7 +119,7 @@ export function buildLeaderboardEmbed(input: LeaderboardInput): SessionEmbed {
   });
 
   return {
-    title: `\u{1F3C6} Pomodoro leaderboard - ${periodLabel(period, now)}`,
+    title: leaderboardTitle(period, now),
     description: lines.length > 0 ? lines.join("\n") : "No credited Pomodoro time yet.",
     fields: [],
   };
