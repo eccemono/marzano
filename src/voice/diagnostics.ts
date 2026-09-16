@@ -15,9 +15,9 @@ import { Readable } from "node:stream";
 
 import { OpusEncoder } from "@discordjs/opus";
 
+import { encodeToOpusFrames } from "./opus";
 import { renderBell } from "./tones";
 import { SAMPLE_RATE, toPcm16 } from "./wav";
-import { encodeToOpusFrames } from "./opus";
 
 export const PLAYBACK_STRATEGIES = ["current", "native", "pcm"] as const;
 export type PlaybackStrategy = (typeof PLAYBACK_STRATEGIES)[number];
@@ -80,28 +80,6 @@ export function encodeNativeFrames(samples: Float64Array): Buffer[] {
 /** Encode with the pure-JS encoder the bot ships with. */
 export function encodePortableFrames(samples: Float64Array): Buffer[] {
   return encodeToOpusFrames(samples, SAMPLE_RATE);
-}
-
-/**
- * Interleaved stereo 16-bit PCM, which is the only shape the raw path accepts.
- *
- * Mono input is duplicated into both channels: Discord's raw format is always
- * stereo, and feeding it mono is a silent failure rather than an error.
- */
-export function pcmStreamFromSamples(samples: Float64Array): Readable {
-  const frames = samples.length;
-  const pcm = Buffer.alloc(frames * 4);
-
-  for (let index = 0; index < frames; index += 1) {
-    const value = toPcm16(samples[index] ?? 0);
-    pcm.writeInt16LE(value, index * 4);
-    pcm.writeInt16LE(value, index * 4 + 2);
-  }
-
-  const stream = new Readable({ read() {} });
-  stream.push(pcm);
-  stream.push(null);
-  return stream;
 }
 
 /** A stream of one Opus packet per chunk. */

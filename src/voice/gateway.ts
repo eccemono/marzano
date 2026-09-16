@@ -16,8 +16,6 @@
  *      replace or silence another guild's connection.
  */
 
-import { Readable } from "node:stream";
-
 import {
   AudioPlayerStatus,
   NoSubscriberBehavior,
@@ -39,10 +37,10 @@ import {
   encodeNativeFrames,
   encodePortableFrames,
   opusStreamFromFrames,
-  pcmStreamFromSamples,
   renderTestBell,
   sumBytes,
 } from "./diagnostics";
+import { pcmStreamFromSamples } from "./pcm";
 import type { SoundLibrary, SoundName } from "./sounds";
 
 export type PlaybackResult = { played: true } | { played: false; reason: string };
@@ -91,14 +89,6 @@ const PLAY_TIMEOUT_MS = 20_000;
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/** One Opus packet per chunk, which is what `StreamType.Opus` expects. */
-function framesToStream(frames: readonly Buffer[]): Readable {
-  const stream = new Readable({ read() {} });
-  for (const frame of frames) stream.push(Buffer.from(frame));
-  stream.push(null);
-  return stream;
 }
 
 interface GuildVoice {
@@ -234,20 +224,28 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
         return { played: false, reason: "not connected to a voice channel" };
       }
 
-      let frames: readonly Buffer[] | null;
+      let samples: Float64Array | null;
       try {
-        frames = sounds.frames(sound, volumePercent);
+        samples = sounds.samples(sound, volumePercent);
       } catch (error) {
         return { played: false, reason: describe(error) };
       }
 
-      if (!frames || frames.length === 0) {
-        return { played: false, reason: "no audio frames available" };
+      if (!samples || samples.length === 0) {
+        return { played: false, reason: "no audio available" };
       }
 
       try {
+        // Raw PCM, deliberately, rather than packets we encoded ourselves.
+        //
+        // Handing the player a pre-encoded Opus stream flushed a two-second bell
+        // in about 125ms: the packets arrive as fast as the stream is read, so
+        // there is nothing to pace against and Discord's client never gets a
+        // sustained signal. Raw PCM goes through the pipeline's own encoder,
+        // which paces it to the length of the audio - measured at 2104ms for the
+        // same bell.
         entry.player.play(
-          createAudioResource(framesToStream(frames), { inputType: StreamType.Opus }),
+          createAudioResource(pcmStreamFromSamples(samples), { inputType: StreamType.Raw }),
         );
         await entersState(entry.player, AudioPlayerStatus.Idle, PLAY_TIMEOUT_MS);
         return { played: true };

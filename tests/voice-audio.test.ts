@@ -5,6 +5,7 @@ import OpusScript from "opusscript";
 import { describe, expect, it } from "vitest";
 
 import { createLogger } from "../src/logger";
+import { pcmStreamFromSamples } from "../src/voice/pcm";
 import { BELL, START_CUE, createSoundLibrary } from "../src/voice/sounds";
 import { FRAME_SAMPLES, encodeToOpusFrames, resampleLinear } from "../src/voice/opus";
 import { applyVolume, renderBell, renderStartCue, scaleToPeak } from "../src/voice/tones";
@@ -203,6 +204,30 @@ describe("Opus encoding", () => {
   });
 });
 
+describe("raw PCM for the audio pipeline", () => {
+  it("duplicates mono samples into both channels as 16-bit PCM", async () => {
+    // StreamType.Raw is stereo 16-bit at 48kHz, and feeding it mono fails
+    // silently rather than erroring.
+    const samples = Float64Array.from([0, 0.5, -0.5]);
+    const stream = pcmStreamFromSamples(samples);
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    const pcm = Buffer.concat(chunks);
+
+    // Three samples, two channels, two bytes each.
+    expect(pcm.length).toBe(12);
+
+    for (let index = 0; index < samples.length; index += 1) {
+      expect(pcm.readInt16LE(index * 4)).toBe(pcm.readInt16LE(index * 4 + 2));
+    }
+
+    expect(pcm.readInt16LE(0)).toBe(0);
+    expect(pcm.readInt16LE(4)).toBeGreaterThan(0);
+    expect(pcm.readInt16LE(8)).toBeLessThan(0);
+  });
+});
+
 describe("sound library", () => {
   it("preloads both committed sounds", () => {
     const report = createSoundLibrary({ directory: ASSETS, logger: silentLogger() }).preload();
@@ -217,6 +242,34 @@ describe("sound library", () => {
 
     expect(frames).not.toBeNull();
     expect(frames?.length).toBe(100);
+  });
+
+  it("returns decoded samples for a known sound", () => {
+    // Cue playback streams these, so they have to exist for every cue that
+    // preloads successfully.
+    const sounds = createSoundLibrary({ directory: ASSETS, logger: silentLogger() });
+    const samples = sounds.samples(BELL, 80);
+
+    expect(samples).not.toBeNull();
+    // The bell is two seconds at 48kHz.
+    expect(samples?.length).toBe(96_000);
+  });
+
+  it("applies volume to the samples", () => {
+    const sounds = createSoundLibrary({ directory: ASSETS, logger: silentLogger() });
+    const loud = sounds.samples(BELL, 100);
+    const quiet = sounds.samples(BELL, 25);
+
+    const peak = (data: Float64Array): number =>
+      data.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
+
+    expect(peak(loud as Float64Array)).toBeGreaterThan(peak(quiet as Float64Array));
+  });
+
+  it("returns no samples at zero volume", () => {
+    const sounds = createSoundLibrary({ directory: ASSETS, logger: silentLogger() });
+
+    expect(sounds.samples(BELL, 0)).toBeNull();
   });
 
   it("returns null at zero volume rather than playing silence", () => {

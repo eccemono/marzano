@@ -203,6 +203,20 @@ describe("the voice gateway changes its own self state", () => {
     expect(source).not.toContain("setMute(");
     expect(source).not.toContain("setDeaf(");
   });
+
+  it("plays cues as raw PCM, not as a pre-encoded packet stream", async () => {
+    // A pre-encoded Opus stream is drained as fast as it can be read: a measured
+    // two-second bell reached the player in about 125ms and was effectively
+    // inaudible. Raw PCM goes through the pipeline's encoder, which paces it to
+    // the length of the audio (measured 2104ms). This asserts the *playback*
+    // path, because a fake gateway cannot hear the difference.
+    const source = await readFile(join(__dirname, "..", "src", "voice", "gateway.ts"), "utf8");
+    const play = source.slice(source.indexOf("async play("), source.indexOf("async setSilenced("));
+
+    expect(play).toContain("StreamType.Raw");
+    expect(play).toContain("sounds.samples(");
+    expect(play).not.toContain("StreamType.Opus");
+  });
 });
 
 describe("the /test audio diagnostic is wired into the interaction handler", () => {
