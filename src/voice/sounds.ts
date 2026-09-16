@@ -38,9 +38,19 @@ export const WORK_CUE = "work";
 /** Played when a break begins - which is also the end of a work period. */
 export const BREAK_CUE = "break";
 
-export type SoundName = typeof JOIN_CUE | typeof WORK_CUE | typeof BREAK_CUE;
+/**
+ * Played when a break ends, before the next work period.
+ *
+ * The chill "heads up, work is coming" cue. In semi and manual modes it plays at
+ * the boundary, and the actual work-start cue plays when the user presses
+ * Continue. Auto mode skips it: one cue per transition, and that cue is the
+ * work-start sound.
+ */
+export const BREAK_END_CUE = "endwork";
 
-export const SOUND_NAMES: readonly SoundName[] = [JOIN_CUE, WORK_CUE, BREAK_CUE];
+export type SoundName = typeof JOIN_CUE | typeof WORK_CUE | typeof BREAK_CUE | typeof BREAK_END_CUE;
+
+export const SOUND_NAMES: readonly SoundName[] = [JOIN_CUE, WORK_CUE, BREAK_CUE, BREAK_END_CUE];
 
 export interface SoundLoadReport {
   available: SoundName[];

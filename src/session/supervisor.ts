@@ -186,6 +186,22 @@ export class SessionSupervisor {
   }
 
   /**
+   * The work-start cue, for when Continue actually begins a focus period.
+   *
+   * At a held work boundary the chill "break is over" cue has already played, so
+   * this is the second half of that pair. Nothing is played unless the session
+   * really is running focus - a Continue that landed on a break, or on a session
+   * that has since stopped, must stay silent.
+   */
+  announceContinue(guildId: string): void {
+    const session = getActiveSession(this.db, guildId);
+    if (!session || isStopped(session) || isPaused(session)) return;
+    if (session.stage !== "focus") return;
+
+    this.detach(guildId, "work start cue", this.voice.announceContinue(session));
+  }
+
+  /**
    * Re-arm the stage wake after something outside the supervisor changed the
    * session - a skip, an extend, or a split change all move the deadline.
    */

@@ -195,13 +195,14 @@ describe("buildSessionEmbed", () => {
     expect(embed).not.toHaveProperty("footer");
   });
 
-  it("marks a paused session and shows its held remainder", () => {
+  it("marks a paused session and names what is about to start", () => {
     const paused = pause(newSession(), T0 + 10 * MINUTE);
     const embed = buildSessionEmbed({ session: paused, now: T0 + 99 * MINUTE });
 
     expect(embed.title).toContain("(paused)");
-    expect(embed.description).toContain("Paused");
-    expect(embed.description).toContain("15m 00s left");
+    // The held stage has not started, so the description names it rather than
+    // counting anything down.
+    expect(embed.description).toBe("Upcoming 25m 00s Focus");
     // A paused session has no deadline, so it must not show a relative
     // timestamp - that would keep ticking and claim time is passing.
     expect(embed.description).not.toContain("<t:");
@@ -245,10 +246,13 @@ describe("buildSessionEmbed", () => {
 
   it("renders a stopped session without claiming time remains", () => {
     const stopped = terminate(newSession(), "everyone left");
+    const embed = buildSessionEmbed({ session: stopped, now: T0 + 999 * MINUTE });
 
-    expect(buildSessionEmbed({ session: stopped, now: T0 + 999 * MINUTE }).description).toContain(
-      "0m 00s left",
-    );
+    expect(embed.description).toBe("This session has ended.");
+    expect(embed.title).toContain("(ended)");
+    // It must not promise an upcoming stage, nor claim time is passing.
+    expect(embed.description).not.toContain("Upcoming");
+    expect(embed.description).not.toContain("<t:");
   });
 
   it("is pure: the same input always renders the same output", () => {

@@ -6,7 +6,13 @@ import { describe, expect, it } from "vitest";
 
 import { createLogger } from "../src/logger";
 import { pcmStreamFromSamples } from "../src/voice/pcm";
-import { BREAK_CUE, JOIN_CUE, WORK_CUE, createSoundLibrary } from "../src/voice/sounds";
+import {
+  BREAK_CUE,
+  BREAK_END_CUE,
+  JOIN_CUE,
+  WORK_CUE,
+  createSoundLibrary,
+} from "../src/voice/sounds";
 import { FRAME_SAMPLES, encodeToOpusFrames, resampleLinear } from "../src/voice/opus";
 import { applyVolume, renderBell, renderStartCue, scaleToPeak } from "../src/voice/tones";
 import { SAMPLE_RATE, WavError, decodeWav, encodeWav, fromPcm16, toPcm16 } from "../src/voice/wav";
@@ -229,10 +235,10 @@ describe("raw PCM for the audio pipeline", () => {
 });
 
 describe("sound library", () => {
-  it("preloads both committed sounds", () => {
+  it("preloads every committed cue", () => {
     const report = createSoundLibrary({ directory: ASSETS, logger: silentLogger() }).preload();
 
-    expect(report.available).toEqual([JOIN_CUE, WORK_CUE, BREAK_CUE]);
+    expect(report.available).toEqual([JOIN_CUE, WORK_CUE, BREAK_CUE, BREAK_END_CUE]);
     expect(report.unavailable).toEqual([]);
   });
 
@@ -289,6 +295,7 @@ describe("sound library", () => {
       JOIN_CUE,
       WORK_CUE,
       BREAK_CUE,
+      BREAK_END_CUE,
     ]);
   });
 

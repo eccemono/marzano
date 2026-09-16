@@ -4,7 +4,7 @@ import { BUILT_IN_DEFAULTS } from "../src/domain/config";
 import { createLogger } from "../src/logger";
 import type { PlaybackResult, VoiceGateway } from "../src/voice/gateway";
 import { SessionVoice, type VoiceSession } from "../src/voice/manager";
-import { BREAK_CUE, JOIN_CUE, WORK_CUE, type SoundName } from "../src/voice/sounds";
+import { BREAK_CUE, BREAK_END_CUE, JOIN_CUE, WORK_CUE, type SoundName } from "../src/voice/sounds";
 
 const GUILD = "111111111111111111";
 const GUILD_B = "444444444444444444";
@@ -76,6 +76,7 @@ function newSession(overrides: Partial<VoiceSession> = {}): VoiceSession {
     guildId: GUILD,
     voiceChannelId: "222222222222222222",
     stage: "focus",
+    state: "running",
     config: { soundEnabled: true, soundVolume: BUILT_IN_DEFAULTS.soundVolume },
     ...overrides,
   };
@@ -153,6 +154,27 @@ describe("stage transitions", () => {
     expect(gateway.playedSounds).toEqual([`play:${BREAK_CUE}:80`]);
   });
 
+  it("plays the chill break-over cue, not the work cue, when work is waiting", async () => {
+    // Semi and manual: the break ended and work is held for Continue. The loud
+    // work cue belongs to the moment work actually starts, which is later - so a
+    // held boundary is two distinct sounds, not one.
+    const { gateway, voice } = setup();
+    const session = newSession({ stage: "focus", state: "paused" });
+
+    await voice.announceTransition(session);
+
+    expect(gateway.playedSounds).toEqual([`play:${BREAK_END_CUE}:80`]);
+    expect(gateway.playedSounds).not.toContain(`play:${WORK_CUE}:80`);
+  });
+
+  it("plays the work cue when Continue actually starts the work", async () => {
+    const { gateway, voice } = setup();
+
+    await voice.announceContinue(newSession({ stage: "focus", state: "running" }));
+
+    expect(gateway.playedSounds).toEqual([`play:${WORK_CUE}:80`]);
+  });
+
   it("reuses the existing connection instead of rejoining", async () => {
     const { gateway, voice } = setup();
     const session = newSession();
@@ -212,7 +234,7 @@ describe("sound configuration", () => {
 
     for (const call of gateway.played) {
       const sound = call.split(":")[2];
-      expect([JOIN_CUE, WORK_CUE, BREAK_CUE]).toContain(sound);
+      expect([JOIN_CUE, WORK_CUE, BREAK_CUE, BREAK_END_CUE]).toContain(sound);
     }
   });
 });

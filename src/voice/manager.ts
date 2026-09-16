@@ -17,12 +17,12 @@
  *     leave, silence or replace a session in another.
  */
 
-import type { SessionStage } from "../domain/timer";
+import type { SessionStage, SessionState } from "../domain/timer";
 import type { Logger } from "../logger";
 
 import type { PlaybackStrategy } from "./diagnostics";
 import type { TestPlaybackReport, VoiceGateway } from "./gateway";
-import { BREAK_CUE, JOIN_CUE, WORK_CUE, type SoundName } from "./sounds";
+import { BREAK_CUE, BREAK_END_CUE, JOIN_CUE, WORK_CUE, type SoundName } from "./sounds";
 
 /** The subset of a session this layer needs. */
 export interface VoiceSession {
@@ -30,6 +30,14 @@ export interface VoiceSession {
   voiceChannelId: string;
   /** The stage the session is *now* in, which picks the boundary cue. */
   stage: SessionStage;
+  /**
+   * Whether that stage is actually running.
+   *
+   * A held stage has changed over but is waiting for Continue, and that is the
+   * difference between one cue and two at a work boundary. Callers never pass a
+   * stopped session, so only `running` and `paused` reach the cue choice.
+   */
+  state: SessionState;
   config: {
     soundEnabled: boolean;
     soundVolume: number;
@@ -122,17 +130,41 @@ export class SessionVoice {
   /**
    * The boundary cue for the stage that has just begun.
    *
-   * A work period and a break deliberately sound different - one means "start",
-   * the other "stop and rest" - so they are tellable apart without looking. The
-   * bot also deafens itself for a work period and undeafens for a break, which
-   * is a cue the others in the channel can see rather than hear.
+   * How many cues a boundary gets depends on whether it was continuous:
+   *
+   *   - entering a break always plays the break cue, whether the break started
+   *     by itself or is waiting for Continue;
+   *   - entering work by itself (auto) plays the one work cue;
+   *   - entering work that is waiting (semi/manual) plays the chill "break is
+   *     over" cue here, and the work cue when Continue is pressed - two distinct
+   *     moments, which is what makes a held work start feel like a held start.
+   *
+   * The work cue is the only loud one and only ever means "focus is starting".
    */
   async announceTransition(session: VoiceSession): Promise<void> {
-    const working = session.stage === "focus";
-    await this.announce(session, working ? WORK_CUE : BREAK_CUE);
+    if (session.stage === "focus") {
+      if (session.state === "paused") {
+        await this.announce(session, BREAK_END_CUE);
+      } else {
+        await this.announce(session, WORK_CUE);
+      }
 
-    if (working) await this.deafenForWork(session.guildId);
-    else await this.setDeafened(session.guildId, false);
+      await this.deafenForWork(session.guildId);
+      return;
+    }
+
+    await this.announce(session, BREAK_CUE);
+    await this.setDeafened(session.guildId, false);
+  }
+
+  /**
+   * The work-start cue, played when Continue begins a focus period.
+   *
+   * Only semi and manual modes reach this: auto mode starts work by itself, so
+   * nobody presses anything and the cue has already played.
+   */
+  async announceContinue(session: VoiceSession): Promise<void> {
+    await this.announce(session, WORK_CUE);
   }
 
   /** Deafen after the cushion, so the cue is not talking over the cue. */

@@ -1,5 +1,5 @@
 import type { TimerSession } from "../domain/timer";
-import { elapsedMs, isPaused, remainingMs, stageDurationMs } from "../domain/timer";
+import { elapsedMs, isPaused, isStopped, remainingMs, stageDurationMs } from "../domain/timer";
 import { factForBreak } from "../domain/facts";
 
 /**
@@ -128,20 +128,22 @@ export function buildSessionEmbed(input: SessionEmbedInput): SessionEmbed {
   const { session, now } = input;
 
   const duration = stageDurationMs(session.stage, session.config);
-  const remaining = remainingMs(session, now);
   const elapsed = elapsedMs(session, now);
 
   const paused = isPaused(session);
-  const stateLabel = paused ? " (paused)" : "";
+  const stopped = isStopped(session);
+  const stateLabel = stopped ? " (ended)" : paused ? " (paused)" : "";
 
   const split = `${session.config.focusMinutes}/${session.config.shortBreakMinutes}/${session.config.longBreakMinutes}`;
 
-  // A paused session has no deadline - it resumes on an explicit action - so it
-  // gets a fixed duration instead of a timestamp that would keep ticking.
+  // A held session has no deadline - it starts on an explicit action - so the
+  // description names what is about to start rather than counting anything down.
+  // A stopped one has nothing to promise at all.
   const deadline = session.stageEndsAt;
-  const countdown =
-    paused || deadline === null
-      ? `Paused with ${formatDuration(remaining)} left in this stage.`
+  const countdown = stopped
+    ? "This session has ended."
+    : paused || deadline === null
+      ? `Upcoming ${formatDuration(duration)} ${STAGE_LABELS[session.stage]}`
       : `# Ends in ${relativeTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
 
   const fields: SessionEmbedField[] = [

@@ -229,6 +229,17 @@ export async function handleSessionButton(
       deps.supervisor.announceTransition(guildId);
     }
 
+    // Continue on a held boundary. The chill "break is over" cue played when
+    // the boundary was crossed; this is the work-start cue that makes the two
+    // moments distinct.
+    //
+    // Gated on `awaitingContinue` rather than on the action alone: resuming a
+    // session the user paused mid-stage is not work starting, and the loud cue
+    // is reserved for focus actually beginning.
+    if (resolved === "resume" && stored.awaitingContinue) {
+      deps.supervisor.announceContinue(guildId);
+    }
+
     const rendered = await deps.presenter.render(applied.session);
     if (rendered.messageId !== applied.session.statusMessageId) {
       saveActiveSession(deps.db, { ...applied.session, statusMessageId: rendered.messageId });

@@ -592,6 +592,7 @@ async function handleTest(
     guildId,
     voiceChannelId,
     stage: "focus" as const,
+    state: "running" as const,
     config: { soundEnabled: true, soundVolume: 100 },
   };
 
