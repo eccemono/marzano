@@ -203,6 +203,9 @@ export async function handleSessionButton(
     // A skip moves the session into a new stage, so it gets the bell. Not
     // awaited: audio must not delay the acknowledgement.
     if (resolved === "skip") {
+      // Recorded before the move so the skipped stage keeps its own window, and
+      // recorded as skipped so it earns no focus credit.
+      deps.supervisor.noteSkipped(guildId);
       deps.supervisor.announceTransition(guildId);
     }
 

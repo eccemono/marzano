@@ -10,11 +10,19 @@ import { SPLIT_INPUT_ID, SPLIT_MODAL_ID, buildSplitModal } from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
 import { handleSessionButton } from "./session-buttons";
 import { SESSION_SPLIT_MODAL_ID, authorizeControl } from "./session-controls";
+import { buildLeaderboardEmbed } from "./history-views";
+import { leaderboardTotals } from "../db/history-repository";
+import { periodBounds, type LeaderboardPeriod } from "../domain/attendance";
 import type { SessionRendererPort } from "./session-renderer";
 import type { SessionSupervisor } from "../session/supervisor";
 import { LICENSE, REPOSITORY_URL, VERSION } from "../runtime";
 
-import { INFO_COMMAND, POMODORO_COMMAND, type PomodoroSubcommand } from "../commands/definitions";
+import {
+  INFO_COMMAND,
+  POMODORO_COMMAND,
+  PERIODS,
+  type PomodoroSubcommand,
+} from "../commands/definitions";
 import { buildInfoEmbed, type InfoPayload } from "../commands/info";
 import { decideStart } from "../commands/start-decision";
 import { WizardError, applyChannelWizard, applyGuildDefaultsWizard } from "../commands/wizard";
@@ -292,6 +300,36 @@ async function handleStop(
   await interaction.reply(ephemeral(`Stopped the session in <#${session.voiceChannelId}>.`));
 }
 
+async function handleLeaderboard(
+  interaction: ChatInputCommandInteraction,
+  deps: HandlerDeps,
+): Promise<void> {
+  const guildId = interaction.guildId;
+  if (!guildId) {
+    await interaction.reply(ephemeral("Marzano only works inside a server."));
+    return;
+  }
+
+  const requested = interaction.options.getString("period") ?? "monthly";
+  const period: LeaderboardPeriod = (PERIODS as readonly string[]).includes(requested)
+    ? (requested as LeaderboardPeriod)
+    : "monthly";
+
+  const now = Date.now();
+
+  // Public rather than ephemeral: a leaderboard is worth showing the channel,
+  // which is the whole point of having one.
+  await interaction.reply({
+    embeds: [
+      buildLeaderboardEmbed({
+        period,
+        totals: leaderboardTotals(deps.db, guildId, periodBounds(period, now)),
+        now,
+      }),
+    ],
+  });
+}
+
 /**
  * Change the split for the running session only.
  *
@@ -441,6 +479,9 @@ export async function handleInteraction(
       return;
     case "stop":
       await handleStop(interaction, deps);
+      return;
+    case "leaderboard":
+      await handleLeaderboard(interaction, deps);
       return;
   }
 }

@@ -142,6 +142,42 @@ export class SessionPresenter {
   }
 
   /**
+   * Replace the status message with an arbitrary embed and no controls.
+   *
+   * Used for the terminal summary: the session is over, so the buttons would be
+   * dead, and the summary is what the channel should keep.
+   */
+  async renderWithEmbed(
+    session: TimerSession,
+    embed: SessionEmbed,
+    components: ActionRowBuilder<ButtonBuilder>[] = [],
+  ): Promise<RenderResult> {
+    const channelId = session.textChannelId ?? session.voiceChannelId;
+    const payload: SessionPayload = { embeds: [embed], components };
+
+    if (session.statusMessageId) {
+      try {
+        await this.gateway.edit(channelId, session.statusMessageId, payload);
+        this.consecutiveFailures = 0;
+        return { messageId: session.statusMessageId, replaced: false };
+      } catch (error) {
+        if (!(error instanceof SessionMessageMissingError)) {
+          this.consecutiveFailures += 1;
+          throw error;
+        }
+        this.logger.warn("status message was deleted; posting the summary instead", {
+          guildId: session.guildId,
+        });
+      }
+    }
+
+    const messageId = await this.gateway.post(channelId, payload);
+    this.consecutiveFailures = 0;
+
+    return { messageId, replaced: Boolean(session.statusMessageId) };
+  }
+
+  /**
    * Refresh the session on a repeating timer, backing off on failure.
    *
    * `getSession` is re-read every tick, so the loop always renders current
