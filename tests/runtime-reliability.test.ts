@@ -217,6 +217,18 @@ describe("the voice gateway changes its own self state", () => {
     expect(play).toContain("sounds.samples(");
     expect(play).not.toContain("StreamType.Opus");
   });
+
+  it("rebuilds a dropped voice connection instead of only logging it", async () => {
+    // Giving up quietly left a dead entry in the connection map, so every later
+    // `join` short-circuited on it and the rest of the session ran silent with
+    // no way back. The session itself is still never terminated by an audio
+    // problem - only the connection is rebuilt.
+    const source = await readFile(join(__dirname, "..", "src", "voice", "gateway.ts"), "utf8");
+    const fromDisconnect = source.slice(source.indexOf("VoiceConnectionStatus.Disconnected"));
+    const handler = fromDisconnect.slice(0, fromDisconnect.indexOf("}));"));
+
+    expect(handler).toContain("await connect(");
+  });
 });
 
 describe("the /test audio diagnostic is wired into the interaction handler", () => {

@@ -107,6 +107,14 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
   const { client, sounds, logger } = options;
 
   const voices = new Map<string, GuildVoice>();
+  /**
+   * The self-deafen state last pushed for a guild.
+   *
+   * Setting it means a `rejoin`, so it is only worth doing when the value
+   * actually changes - and it must be forgotten whenever the connection is
+   * rebuilt, because a fresh connection always starts undeafened.
+   */
+  const silenced = new Map<string, boolean>();
 
   function createPlayer(guildId: string): AudioPlayer {
     const player = createAudioPlayer({
@@ -138,6 +146,76 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
     }
 
     voices.delete(guildId);
+    silenced.delete(guildId);
+  }
+
+  /**
+   * Build a fresh connection for a guild, replacing any existing one.
+   *
+   * Extracted so the disconnect handler can call it too: a connection that
+   * cannot be recovered has to be rebuilt, and there was previously no way to
+   * reach the join path from inside that handler.
+   */
+  async function connect(guildId: string, channelId: string): Promise<void> {
+    destroy(guildId);
+
+    const guild = await client.guilds.fetch(guildId);
+    const player = createPlayer(guildId);
+
+    const created = joinVoiceChannel({
+      channelId,
+      guildId,
+      adapterCreator: guild.voiceAdapterCreator,
+      // Fully open at join: the bot has no microphone to hear anything with, so
+      // the deafen that follows is a *cue* for everyone else, not a privacy
+      // measure - see setSilenced.
+      selfDeaf: false,
+      selfMute: false,
+    });
+
+    voices.set(guildId, { connection: created, player, channelId });
+
+    created.subscribe(player);
+
+    created.on(VoiceConnectionStatus.Disconnected, () => {
+      void (async () => {
+        try {
+          // A move between channels shows up as Signalling/Connecting. If
+          // neither arrives the connection is genuinely dead.
+          await Promise.race([
+            entersState(created, VoiceConnectionStatus.Signalling, 5_000),
+            entersState(created, VoiceConnectionStatus.Connecting, 5_000),
+          ]);
+          logger.info("voice connection is reconnecting", { guildId });
+        } catch {
+          // @discordjs/voice's guidance is to rebuild here. Only logging - what
+          // this used to do - left a dead entry in the map, so every later
+          // `join` short-circuited on it and the rest of the session ran silent
+          // with no way back.
+          logger.warn("voice connection dropped; rebuilding it", { guildId });
+          try {
+            await connect(guildId, channelId);
+            logger.info("voice connection rebuilt", { guildId });
+          } catch (error) {
+            logger.warn("voice connection could not be rebuilt", {
+              guildId,
+              reason: describe(error),
+            });
+          }
+        }
+      })();
+    });
+
+    try {
+      await entersState(created, VoiceConnectionStatus.Ready, READY_TIMEOUT_MS);
+    } catch (error) {
+      // Never leave a dead connection in the map: a later join would then
+      // short-circuit on it and the session would have no audio at all.
+      destroy(guildId);
+      throw error;
+    }
+
+    logger.info("joined voice channel", { guildId, channelId });
   }
 
   return {
@@ -151,57 +229,7 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
         return;
       }
 
-      // A connection to somewhere else in the same guild is stale; drop it
-      // before creating the new one so the guild never holds two.
-      destroy(guildId);
-
-      const guild = await client.guilds.fetch(guildId);
-      const player = createPlayer(guildId);
-
-      const created = joinVoiceChannel({
-        channelId,
-        guildId,
-        adapterCreator: guild.voiceAdapterCreator,
-        // Fully open: neither deafened nor muted. A bot has no microphone to
-        // hear anything with, so deafening it serves no purpose - and any
-        // self-state toggle around playback is exactly what has been breaking
-        // audio. "Silent between bells" comes from simply not playing, not from
-        // suppressing transmission.
-        selfDeaf: false,
-        selfMute: false,
-      });
-
-      voices.set(guildId, { connection: created, player, channelId });
-
-      created.subscribe(player);
-
-      // A dropped connection is recovered in place; if it cannot be, playback
-      // simply fails and is logged. The session itself is never terminated by
-      // an audio problem.
-      created.on(VoiceConnectionStatus.Disconnected, () => {
-        void (async () => {
-          try {
-            await Promise.race([
-              entersState(created, VoiceConnectionStatus.Signalling, 5_000),
-              entersState(created, VoiceConnectionStatus.Connecting, 5_000),
-            ]);
-            logger.info("voice connection is reconnecting", { guildId });
-          } catch {
-            logger.warn("voice connection dropped and could not be recovered", { guildId });
-          }
-        })();
-      });
-
-      try {
-        await entersState(created, VoiceConnectionStatus.Ready, READY_TIMEOUT_MS);
-      } catch (error) {
-        // Never leave a dead connection in the map: a later join would then
-        // short-circuit on it and the session would have no audio at all.
-        destroy(guildId);
-        throw error;
-      }
-
-      logger.info("joined voice channel", { guildId, channelId });
+      await connect(guildId, channelId);
     },
 
     leave(guildId: string): void {
@@ -259,32 +287,37 @@ export function createDiscordVoiceGateway(options: DiscordVoiceGatewayOptions): 
       }
     },
 
-    async setSilenced(guildId: string, silenced: boolean): Promise<void> {
+    async setSilenced(guildId: string, silenced_: boolean): Promise<void> {
       const entry = voices.get(guildId);
       if (!entry) return;
       if (entry.connection.state.status === VoiceConnectionStatus.Destroyed) return;
 
+      // A rejoin is not free, so skip it when nothing would change. This also
+      // keeps the common case - a work period following another work period -
+      // from touching the connection at all.
+      if (silenced.get(guildId) === silenced_) return;
+
       try {
-        // This must be a *self* mute, not a server mute. The member-edit API on
-        // VoiceState is moderation: it needs MUTE_MEMBERS permission and leaves
-        // the self-mute flag this connection was created with untouched. That is
-        // why the bot used to stay silent through its own cues.
+        // A *self* deafen, not a server deafen. The member-edit API on VoiceState
+        // is moderation: it needs MUTE_MEMBERS and leaves the connection's own
+        // flags untouched.
         //
-        // `rejoin` re-sends the voice state payload with the new self flags. On
-        // a Ready connection it does not renegotiate, so this is a single
-        // lightweight gateway update rather than a reconnect.
+        // `rejoin` re-sends the voice state payload with the new flags. It is the
+        // only mechanism available here (this discord.js version has no
+        // setSelfDeaf, and no public raw-gateway send), which is why it is called
+        // as rarely as possible. `selfMute` must stay false forever: turning it on
+        // is what silences the bot's own cues, and "silent between bells" comes
+        // from not playing, not from suppressing transmission.
         entry.connection.rejoin({
           channelId: entry.channelId,
-          // selfMute must stay false forever: turning it on is what silences the
-          // bot's own cues. "Silent between bells" comes from not playing
-          // anything, not from suppressing transmission.
           selfMute: false,
-          selfDeaf: silenced,
+          selfDeaf: silenced_,
         });
+        silenced.set(guildId, silenced_);
       } catch (error) {
         logger.warn("failed to change the bot's own voice state", {
           guildId,
-          silenced,
+          silenced: silenced_,
           reason: describe(error),
         });
       }

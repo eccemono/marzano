@@ -86,8 +86,10 @@ describe("manual mode", () => {
     expect(label).toBe("Continue");
   });
 
-  it("is the default: a fresh config waits", () => {
-    expect(BUILT_IN_DEFAULTS.advanceMode).toBe("manual");
+  it("defaults to semi: breaks roll on by themselves, work does not", () => {
+    // The useful default for a focus tool: the break arrives without anyone
+    // asking, and starting the next work period is a deliberate act.
+    expect(BUILT_IN_DEFAULTS.advanceMode).toBe("semi");
   });
 });
 

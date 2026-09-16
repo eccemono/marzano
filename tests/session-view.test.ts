@@ -181,10 +181,10 @@ describe("buildSessionEmbed", () => {
     expect(longBreak.title).toContain("Long break");
   });
 
-  it("counts down with a Discord relative timestamp", () => {
+  it("counts down with a Discord relative timestamp, labelled", () => {
     const embed = buildSessionEmbed({ session: newSession(), now: T0 + 10 * MINUTE });
 
-    expect(embed.description).toContain("<t:1760001500:R>");
+    expect(embed.description).toContain("Ends in <t:1760001500:R>");
     // The absolute clock-time form is deliberately gone.
     expect(embed.description).not.toContain(":t>");
   });

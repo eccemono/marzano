@@ -61,7 +61,15 @@ export interface SessionPresenterOptions {
 }
 
 export const DEFAULT_REFRESH_MS = 15_000;
-export const DEFAULT_MAX_REFRESH_MS = 120_000;
+/**
+ * Ceiling on the refresh backoff.
+ *
+ * This message is how the session is read, so a long backoff leaves the channel
+ * looking at a stage that has already ended. The old 120s ceiling meant a single
+ * transient failure could freeze the status for two minutes - most of a short
+ * stage. Failures still back off; they just do not back off past usefulness.
+ */
+export const DEFAULT_MAX_REFRESH_MS = 30_000;
 
 export class SessionPresenter {
   private readonly gateway: SessionMessageGateway;
@@ -160,10 +168,14 @@ export class SessionPresenter {
       } catch (error) {
         if (!(error instanceof SessionMessageMissingError)) {
           this.consecutiveFailures += 1;
+          // The reason used to be dropped here, which made "the status does not
+          // change" impossible to diagnose from the logs: the warning said a
+          // refresh failed but never why.
           this.logger.warn("status message refresh failed", {
             guildId: session.guildId,
             failures: this.consecutiveFailures,
             nextDelayMs: this.nextDelayMs(),
+            reason: error instanceof Error ? error.message : String(error),
           });
           throw error;
         }

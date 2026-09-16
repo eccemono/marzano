@@ -207,7 +207,10 @@ export function planStart(deps: HandlerDeps, request: StartRequest): StartPlan {
 
   return {
     kind: "ready",
-    config: resolveConfig(decision.split ?? undefined, stored?.config ?? undefined),
+    // The command's split is the most specific thing the caller said, so it is
+    // applied last and wins. Passing it first let a channel's saved config
+    // override it, so `/start 2 2 2` in a channel configured `1 1 1` ran 1/1/1.
+    config: resolveConfig(stored?.config ?? undefined, decision.split ?? undefined),
   };
 }
 

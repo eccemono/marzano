@@ -142,7 +142,7 @@ export function buildSessionEmbed(input: SessionEmbedInput): SessionEmbed {
   const countdown =
     paused || deadline === null
       ? `Paused with ${formatDuration(remaining)} left in this stage.`
-      : `# ${relativeTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
+      : `# Ends in ${relativeTimestamp(deadline)}\n${progressBar(elapsed, duration)}`;
 
   const fields: SessionEmbedField[] = [
     { name: "Cycle", value: cyclePosition(session), inline: true },

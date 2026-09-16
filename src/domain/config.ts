@@ -66,7 +66,7 @@ export const BUILT_IN_DEFAULTS: PomodoroConfig = {
   cyclesBeforeLongBreak: 4,
   soundEnabled: true,
   soundVolume: 80,
-  advanceMode: "manual",
+  advanceMode: "semi",
 };
 
 export class ConfigValidationError extends Error {
