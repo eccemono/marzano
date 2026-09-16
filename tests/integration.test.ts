@@ -29,7 +29,7 @@ describe("a full multi-cycle session", () => {
         cyclesBeforeLongBreak: 4,
         soundEnabled: true,
         soundVolume: 80,
-        autoAdvance: true,
+        advanceMode: "auto",
       },
     });
     await supervisor.begin(session);

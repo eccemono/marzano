@@ -45,10 +45,15 @@ const CONFIGURE_OPTIONS = [
     max_value: 12,
   },
   {
-    type: ApplicationCommandOptionType.Boolean,
-    name: "sound",
-    description: "Whether to play sound cues in this channel",
+    type: ApplicationCommandOptionType.String,
+    name: "auto",
+    description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
     required: false,
+    choices: [
+      { name: "auto - every stage advances by itself", value: "auto" },
+      { name: "manual - wait for Continue every time", value: "manual" },
+      { name: "semi - breaks start by themselves, work waits", value: "semi" },
+    ],
   },
   {
     type: ApplicationCommandOptionType.Integer,
@@ -59,10 +64,15 @@ const CONFIGURE_OPTIONS = [
     max_value: 100,
   },
   {
-    type: ApplicationCommandOptionType.Boolean,
+    type: ApplicationCommandOptionType.String,
     name: "auto",
-    description: "Advance to the next stage automatically (off = wait for Continue)",
+    description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
     required: false,
+    choices: [
+      { name: "auto - every stage advances by itself", value: "auto" },
+      { name: "manual - wait for Continue every time", value: "manual" },
+      { name: "semi - breaks start by themselves, work waits", value: "semi" },
+    ],
   },
   {
     type: ApplicationCommandOptionType.Channel,
@@ -72,10 +82,15 @@ const CONFIGURE_OPTIONS = [
     channel_types: [ChannelType.GuildVoice],
   },
   {
-    type: ApplicationCommandOptionType.Boolean,
-    name: "reset",
-    description: "Forget this channel's saved configuration",
+    type: ApplicationCommandOptionType.String,
+    name: "auto",
+    description: "How stages advance: auto, manual, or semi (auto break, manual next work)",
     required: false,
+    choices: [
+      { name: "auto - every stage advances by itself", value: "auto" },
+      { name: "manual - wait for Continue every time", value: "manual" },
+      { name: "semi - breaks start by themselves, work waits", value: "semi" },
+    ],
   },
 ] as const;
 

@@ -12,7 +12,7 @@
  * make the timer drift, and a session can be reconstructed after a restart.
  */
 
-import { type PomodoroConfig, applySplit } from "./config";
+import { type PomodoroConfig, applySplit, holdsAtBoundary } from "./config";
 import { newFactSeed } from "./facts";
 import type { Split } from "./split";
 
@@ -218,9 +218,10 @@ export function advance(
       stageEndsAt: boundary + stageDurationMs(next.stage, current.config),
     };
 
-    if (!current.config.autoAdvance) {
-      // Manual mode: the next stage is queued and the bell has rung, but the
-      // clock must not start until someone presses Continue.
+    if (holdsAtBoundary(current.config.advanceMode, next.stage)) {
+      // The next stage is queued and the bell has rung, but the clock must not
+      // start until someone presses Continue. Which boundaries hold depends on
+      // the mode - see `holdsAtBoundary`.
       current = {
         ...current,
         state: "paused",

@@ -71,8 +71,8 @@ describe("migrations", () => {
     const result = migrate(db);
 
     expect(result.from).toBe(0);
-    expect(result.to).toBe(4);
-    expect(result.applied).toEqual([1, 2, 3, 4]);
+    expect(result.to).toBe(5);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5]);
 
     db.close();
   });
@@ -83,8 +83,8 @@ describe("migrations", () => {
     const second = migrate(db);
 
     expect(second.applied).toEqual([]);
-    expect(second.from).toBe(4);
-    expect(second.to).toBe(4);
+    expect(second.from).toBe(5);
+    expect(second.to).toBe(5);
 
     db.close();
   });
@@ -281,14 +281,14 @@ describe("durability", () => {
 
     try {
       const first = openMigratedDatabase(directory);
-      expect(first.migration.to).toBe(4);
+      expect(first.migration.to).toBe(5);
       saveChannelConfig(first.db, GUILD, CHANNEL_A, { focusMinutes: 42 });
       saveActiveSession(first.db, sessionRecord({ completedFocusStages: 3 }));
       first.db.close();
 
       const second = openMigratedDatabase(directory);
 
-      expect(currentVersion(second.db)).toBe(4);
+      expect(currentVersion(second.db)).toBe(5);
       expect(getChannelConfig(second.db, GUILD, CHANNEL_A)?.config.focusMinutes).toBe(42);
       expect(getActiveSession(second.db, GUILD)?.completedFocusStages).toBe(3);
 
@@ -305,7 +305,7 @@ describe("durability", () => {
       const nested = join(directory, "deeply", "nested");
       const { db } = openMigratedDatabase(nested);
 
-      expect(currentVersion(db)).toBe(4);
+      expect(currentVersion(db)).toBe(5);
       db.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

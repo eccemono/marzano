@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
 
-import type { PartialConfig } from "../domain/config";
+import type { AdvanceMode, PartialConfig } from "../domain/config";
+import { isAdvanceMode } from "../domain/config";
 import type { Split } from "../domain/split";
 
 /**
@@ -59,12 +60,30 @@ export const CONFIG_INPUT_IDS = {
 } as const;
 
 const YES = ["on", "yes", "true", "1"];
+const OFF = ["off", "no", "false", "0"];
 
 /** Whether the text means "on". Empty text means "not supplied". */
 export function parseOnOff(value: string): boolean | null {
   const trimmed = value.trim().toLowerCase();
   if (trimmed.length === 0) return null;
   return YES.includes(trimmed);
+}
+
+/**
+ * Read an advance mode from modal text.
+ *
+ * Returns null for empty input (meaning "not supplied") and for anything
+ * unrecognised, so the caller can reject a typo explicitly instead of silently
+ * ignoring it. The legacy `on`/`off` spellings still resolve, so anyone used to
+ * the old boolean field is not met with an error.
+ */
+export function parseAdvanceMode(value: string): AdvanceMode | null {
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.length === 0) return null;
+  if (isAdvanceMode(trimmed)) return trimmed;
+  if (YES.includes(trimmed)) return "auto";
+  if (OFF.includes(trimmed)) return "manual";
+  return null;
 }
 
 /**
@@ -121,12 +140,7 @@ export function buildConfigModal(options: {
     initial.soundEnabled === undefined ? undefined : initial.soundEnabled ? "on" : "off",
   );
   add(CONFIG_INPUT_IDS.volume, "Volume (0 to 100)", "80", initial.soundVolume);
-  add(
-    CONFIG_INPUT_IDS.auto,
-    "Auto-advance (on or off)",
-    "off",
-    initial.autoAdvance === undefined ? undefined : initial.autoAdvance ? "on" : "off",
-  );
+  add(CONFIG_INPUT_IDS.auto, "Advance mode (auto, manual or semi)", "manual", initial.advanceMode);
 
   return new ModalBuilder()
     .setCustomId(options.customId)

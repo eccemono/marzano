@@ -8,6 +8,7 @@ import {
 import type { Db } from "../db/database";
 import {
   ConfigValidationError,
+  type AdvanceMode,
   type PartialConfig,
   type PomodoroConfig,
   resolveConfig,
@@ -38,8 +39,8 @@ export interface WizardInput {
   cycles?: number | null;
   sound?: boolean | null;
   volume?: number | null;
-  /** Whether a stage advances on its own, rather than waiting for Continue. */
-  auto?: boolean | null;
+  /** How a stage boundary is crossed: auto, manual or semi. */
+  advanceMode?: AdvanceMode | null;
   /** Copy the saved configuration from this voice channel first. */
   copyFromChannelId?: string | null;
   /** Forget the saved configuration entirely. */
@@ -60,7 +61,7 @@ function hasAnyChange(input: WizardInput): boolean {
     input.cycles != null ||
     input.sound != null ||
     input.volume != null ||
-    input.auto != null ||
+    input.advanceMode != null ||
     input.copyFromChannelId != null
   );
 }
@@ -105,9 +106,9 @@ function applyValues(base: PartialConfig, input: WizardInput, changed: string[])
     next.soundVolume = input.volume;
     changed.push("volume");
   }
-  if (input.auto != null) {
-    next.autoAdvance = input.auto;
-    changed.push("auto");
+  if (input.advanceMode != null) {
+    next.advanceMode = input.advanceMode;
+    changed.push("advance_mode");
   }
 
   return next;

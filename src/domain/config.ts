@@ -21,13 +21,35 @@ export interface PomodoroConfig {
   /** 0-100. */
   soundVolume: number;
   /**
-   * Whether a stage boundary advances on its own.
+   * How a stage boundary is crossed.
    *
-   * False (the default) holds the session at the boundary and waits for someone
-   * to press Continue, so nobody misses the transition. True reproduces the
-   * original auto-forwarding behaviour.
+   * `auto` advances every boundary on its own. `manual` holds at every boundary
+   * and waits for someone to press Continue. `semi` advances into a break by
+   * itself but holds before the next focus period, so the break is automatic and
+   * starting work is a deliberate act.
    */
-  autoAdvance: boolean;
+  advanceMode: AdvanceMode;
+}
+
+/** The three ways a boundary can be handled. See `PomodoroConfig.advanceMode`. */
+export const ADVANCE_MODES = ["auto", "manual", "semi"] as const;
+export type AdvanceMode = (typeof ADVANCE_MODES)[number];
+
+export function isAdvanceMode(value: unknown): value is AdvanceMode {
+  return typeof value === "string" && (ADVANCE_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Whether a boundary that lands on `nextStage` should hold instead of advancing.
+ *
+ * Exported because this single predicate *is* the behaviour difference between
+ * the three modes, and it is worth testing directly rather than only through a
+ * full `advance` run.
+ */
+export function holdsAtBoundary(mode: AdvanceMode, nextStage: string): boolean {
+  if (mode === "manual") return true;
+  // Semi-automatic: the break comes by itself, but starting work does not.
+  return mode === "semi" && nextStage === "focus";
 }
 
 export const CONFIG_LIMITS = {
@@ -44,7 +66,7 @@ export const BUILT_IN_DEFAULTS: PomodoroConfig = {
   cyclesBeforeLongBreak: 4,
   soundEnabled: true,
   soundVolume: 80,
-  autoAdvance: false,
+  advanceMode: "manual",
 };
 
 export class ConfigValidationError extends Error {
@@ -88,6 +110,12 @@ export function validateConfig(config: PomodoroConfig): PomodoroConfig {
     );
   }
 
+  if (!isAdvanceMode(config.advanceMode)) {
+    throw new ConfigValidationError(
+      `advanceMode must be one of ${ADVANCE_MODES.join(", ")}; received ${String(config.advanceMode)}.`,
+    );
+  }
+
   if (config.shortBreakMinutes > config.focusMinutes) {
     throw new ConfigValidationError(
       `The short break (${config.shortBreakMinutes}m) cannot be longer than the focus period (${config.focusMinutes}m).`,
@@ -125,7 +153,7 @@ export function resolveConfig(...layers: Array<PartialConfig | null | undefined>
       cyclesBeforeLongBreak: layer.cyclesBeforeLongBreak ?? merged.cyclesBeforeLongBreak,
       soundEnabled: layer.soundEnabled ?? merged.soundEnabled,
       soundVolume: layer.soundVolume ?? merged.soundVolume,
-      autoAdvance: layer.autoAdvance ?? merged.autoAdvance,
+      advanceMode: layer.advanceMode ?? merged.advanceMode,
     };
   }
 

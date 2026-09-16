@@ -26,7 +26,7 @@ import {
 const MINUTE = 60_000;
 const T0 = 1_760_000_000_000;
 
-const CONFIG: PomodoroConfig = { ...BUILT_IN_DEFAULTS, autoAdvance: true };
+const CONFIG: PomodoroConfig = { ...BUILT_IN_DEFAULTS, advanceMode: "auto" };
 
 function start(now = T0, config: PomodoroConfig = CONFIG) {
   return startSession({

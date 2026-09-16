@@ -9,7 +9,12 @@ import {
 import { getChannelConfig, getGuildDefaults } from "../db/config-repository";
 import type { Db } from "../db/database";
 import { getActiveSession, saveActiveSession } from "../db/session-repository";
-import { BUILT_IN_DEFAULTS, type PomodoroConfig, resolveConfig } from "../domain/config";
+import {
+  BUILT_IN_DEFAULTS,
+  type PomodoroConfig,
+  isAdvanceMode,
+  resolveConfig,
+} from "../domain/config";
 import { SplitError, parseSplit } from "../domain/split";
 import {
   type TimerSession,
@@ -26,6 +31,7 @@ import {
   SPLIT_MODAL_ID,
   buildConfigModal,
   buildSplitModal,
+  parseAdvanceMode,
   parseOnOff,
 } from "./modals";
 import { canConfigureChannel, canConfigureGuild } from "./permissions";
@@ -102,7 +108,7 @@ function describeConfig(config: PomodoroConfig): string {
     `focus ${config.focusMinutes}m, short break ${config.shortBreakMinutes}m, long break ` +
     `${config.longBreakMinutes}m, long break every ${config.cyclesBeforeLongBreak} focus ` +
     `periods, sound ${config.soundEnabled ? "on" : "off"} at ${config.soundVolume}%, ` +
-    `auto-advance ${config.autoAdvance ? "on" : "off"}`
+    `advance mode ${config.advanceMode}`
   );
 }
 
@@ -337,7 +343,9 @@ async function handleConfigure(
   const cycles = interaction.options.getInteger("cycles");
   const sound = interaction.options.getBoolean("sound");
   const volume = interaction.options.getInteger("volume");
-  const auto = interaction.options.getBoolean("auto");
+  // Constrained by the option's choices; anything else resolves to "not set".
+  const autoRaw = interaction.options.getString("auto");
+  const advanceMode = isAdvanceMode(autoRaw) ? autoRaw : null;
   const copyFrom = interaction.options.getChannel("copy_from");
   const reset = interaction.options.getBoolean("reset") ?? false;
 
@@ -347,7 +355,7 @@ async function handleConfigure(
     cycles === null &&
     sound === null &&
     volume === null &&
-    auto === null &&
+    advanceMode === null &&
     copyFrom === null &&
     !reset
   ) {
@@ -367,7 +375,7 @@ async function handleConfigure(
       deps.db,
       guildId,
       interaction.channelId,
-      { split, cycles, sound, volume, auto, copyFromChannelId: copyFrom?.id ?? null, reset },
+      { split, cycles, sound, volume, advanceMode, copyFromChannelId: copyFrom?.id ?? null, reset },
       interaction.user.id,
     );
 
@@ -408,9 +416,17 @@ async function handleDefault(
   const cycles = interaction.options.getInteger("cycles");
   const sound = interaction.options.getBoolean("sound");
   const volume = interaction.options.getInteger("volume");
-  const auto = interaction.options.getBoolean("auto");
+  // Constrained by the option's choices; anything else resolves to "not set".
+  const autoRaw = interaction.options.getString("auto");
+  const advanceMode = isAdvanceMode(autoRaw) ? autoRaw : null;
 
-  if (split === null && cycles === null && sound === null && volume === null && auto === null) {
+  if (
+    split === null &&
+    cycles === null &&
+    sound === null &&
+    volume === null &&
+    advanceMode === null
+  ) {
     const stored = getGuildDefaults(deps.db, guildId);
     await interaction.showModal(
       buildConfigModal({
@@ -428,7 +444,7 @@ async function handleDefault(
       cycles,
       sound,
       volume,
-      auto,
+      advanceMode,
     });
 
     const config = result.config ?? BUILT_IN_DEFAULTS;
@@ -677,8 +693,16 @@ function configInputFromModal(interaction: ModalSubmitInteraction): WizardInput 
   const volume = field(CONFIG_INPUT_IDS.volume).trim();
   if (volume) input.volume = Number(volume);
 
-  const auto = parseOnOff(field(CONFIG_INPUT_IDS.auto));
-  if (auto !== null) input.auto = auto;
+  const autoText = field(CONFIG_INPUT_IDS.auto).trim();
+  if (autoText) {
+    const mode = parseAdvanceMode(autoText);
+    // An unrecognised value is rejected rather than silently dropped: a typo
+    // that quietly changed nothing would be worse than an error message.
+    if (mode === null) {
+      throw new WizardError(`Advance mode must be auto, manual or semi; received "${autoText}".`);
+    }
+    input.advanceMode = mode;
+  }
 
   return input;
 }
@@ -698,9 +722,9 @@ async function handleConfigModalSubmit(
     return;
   }
 
-  const input = configInputFromModal(interaction);
-
   try {
+    const input = configInputFromModal(interaction);
+
     if (scope === "guild") {
       const result = applyGuildDefaultsWizard(deps.db, guildId, input);
       await interaction.reply(

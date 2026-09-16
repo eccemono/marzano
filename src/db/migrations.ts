@@ -176,6 +176,31 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("ALTER TABLE active_sessions ADD COLUMN fact_seed INTEGER NOT NULL DEFAULT 0;");
     },
   },
+  {
+    version: 5,
+    name: "advance mode: replace the auto-advance boolean with a three-way mode",
+    up(db) {
+      // `auto_advance` was a boolean. It is superseded by `advance_mode`, which
+      // also carries the semi-automatic behaviour. The old column is left in
+      // place (SQLite cannot drop one cheaply) but is no longer read or written.
+      db.exec(`
+        ALTER TABLE guild_defaults  ADD COLUMN advance_mode TEXT;
+        ALTER TABLE channel_configs ADD COLUMN advance_mode TEXT;
+        ALTER TABLE active_sessions ADD COLUMN advance_mode TEXT NOT NULL DEFAULT 'manual';
+      `);
+
+      // Backfill: a set boolean becomes its equivalent mode, and "not set here"
+      // stays not set so the layer below still applies.
+      const backfill = `
+        UPDATE guild_defaults  SET advance_mode = CASE WHEN auto_advance = 1 THEN 'auto' ELSE 'manual' END
+         WHERE auto_advance IS NOT NULL;
+        UPDATE channel_configs SET advance_mode = CASE WHEN auto_advance = 1 THEN 'auto' ELSE 'manual' END
+         WHERE auto_advance IS NOT NULL;
+        UPDATE active_sessions SET advance_mode = CASE WHEN auto_advance = 1 THEN 'auto' ELSE 'manual' END;
+      `;
+      db.exec(backfill);
+    },
+  },
 ];
 
 const CREATE_MIGRATION_TABLE = `
